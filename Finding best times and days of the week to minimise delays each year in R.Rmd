@@ -1,0 +1,1292 @@
+---
+title: "ST 2195 Coursework Part 2 a)"
+output: html_document
+date: "2024-03-17"
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Finding best times and best days of the week to minimise delays
+
+```{r}
+install.packages("tidyverse")
+install.packages("lubridate")
+install.packages("readr")
+## Install these packages if needed
+```
+
+
+```{r}
+library(tidyverse) # contains packages like dplyr and ggplot for data manipulation and plotting 
+library(lubridate)  # For easier dates and times manuipulation
+library(readr)  # For reading the CSV files
+```
+## set the working directory to souce file location / the location to where the relevant year csvs and other csvs are located at to read the dataframes
+
+# a.  What are the best times and days of the week to minimise delays each year?
+
+## BEST TIME TO MINIMISE DELAYS
+# We want to identify between Departure and Arrival which variable affects the number of delays more
+
+# Read data for 10 consecutive years
+```{R}
+df99 <- read.csv("1999.csv")
+df00 <- read.csv("2000.csv")
+df01 <- read.csv("2001.csv")
+df02 <- read.csv("2002.csv")
+df03 <- read.csv("2003.csv")
+df04 <- read.csv("2004.csv")
+df05 <- read.csv("2005.csv")
+df06 <- read.csv("2006.csv")
+df07 <- read.csv("2007.csv")
+df08 <- read.csv("2008.csv")
+```
+
+# We group the 10 years of data into one list. At the sametime, we fliter out flights that Diverted during its course as it give rise to discrepancy in Arrival times. We also fliter out Cancelled flights as in the dataframe, the delay columns would be inputed as NaN. We further fliter the columns, only wanting DepDelay, ArrDelay to compare these 2 variables 
+```{r}
+# Combine the 10 dataframes into a list while filtering relevant columns
+dfs_total <- list(
+  filter(df99, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year),
+  filter(df00, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year),
+  filter(df01, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year),
+  filter(df02, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year),
+  filter(df03, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year),
+  filter(df04, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year),
+  filter(df05, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year),
+  filter(df06, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year),
+  filter(df07, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year),
+  filter(df08, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year)
+)
+```
+
+
+# Calculate the total number of flights, total number of delayed departing and arrival flights for each year, Then we proceed to find the % of these flights that were delayed vs ontime
+
+# We group ontime and earlier flights into the same group called ontime 
+
+# After that, we use the above mentioned values to find the percentages of both Departure and Arrival flights that are on time and delayed 
+
+# We finally then group all these numbers into results
+```{r}
+results <- lapply(seq(1999, 2008), function(year) {
+  df_year <- dfs_total[[year - 1999 + 1]]  # To make sure 1999 and 2008 are included in the loop calculation
+  total_flights <- nrow(df_year)
+  
+  # Filter flights with delayed departure and arrival
+  delayed_dep_flights <- df_year[df_year$DepDelay > 0, ]
+  delayed_arr_flights <- df_year[df_year$ArrDelay > 0, ]
+  
+  # Count the number of delayed departure and arrival flights
+  num_delayed_dep_flights <- nrow(delayed_dep_flights)
+  num_delayed_arr_flights <- nrow(delayed_arr_flights)
+  
+  # Calculate percentages
+  percentage_delayed_dep <- (num_delayed_dep_flights / total_flights) * 100
+  percentage_on_time_dep <- 100 - percentage_delayed_dep
+  
+  percentage_delayed_arr <- (num_delayed_arr_flights / total_flights) * 100
+  percentage_on_time_arr <- 100 - percentage_delayed_arr
+  
+  return(data.frame(
+    Year = year,
+    Percentage_Delayed_Departure = percentage_delayed_dep,
+    Percentage_On_Time_Departure = percentage_on_time_dep,
+    Percentage_Delayed_Arrival = percentage_delayed_arr,
+    Percentage_On_Time_Arrival = percentage_on_time_arr
+  ))
+})
+
+```
+
+# Combine results into a singular dataframe
+```{r}
+ten_years_df <- do.call(rbind, results)
+```
+
+# Plotting a diagram using ggplot that consists of 4 bar graphs in each individual year, visualising trends across the 10 years with ease 
+
+# We use the pivot_longer function from tidyverse package to help take the key value data (in this case the 4 different %s) and consolidate them for easier visualisation when plotting 
+
+# Afterwards we plot the 4 different bar graphs using geom_bar. stat = 'identity' helps correspond the height of the bar to its % value, position = ___ helps to position the 4 different bars side by side with consistent gaps between each other to prevent overlap. theme_minimal() removes any unnesscary elements to better organise the appearance of the diagram
+```{r}
+# Plot the results
+
+# Combine the data for all ten years into one dataframe
+combined_df <- ten_years_df %>%
+  pivot_longer(cols = starts_with("Percentage"), names_to = "Performance", values_to = "Percentage")
+
+# Plot all four bars for each year
+ggplot(combined_df, aes(x = factor(Year), y = Percentage, fill = Performance)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9), width = 0.2) +
+  labs(title = "Flight Performance Over Years",
+       x = "Year",
+       y = "Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 1)) ## rotates the x-axis labels to 45 degrees to prevent label overlapping
+
+```
+
+
+# Calculate mean values
+```{r}
+mean_delayed_departure <- mean(ten_years_df$Percentage_Delayed_Departure)
+mean_on_time_departure <- mean(ten_years_df$Percentage_On_Time_Departure)
+mean_delayed_arrival <- mean(ten_years_df$Percentage_Delayed_Arrival)
+mean_on_time_arrival <- mean(ten_years_df$Percentage_On_Time_Arrival)
+
+# Print mean values
+cat("Mean Percentage Delayed Departure:", mean_delayed_departure, "\n")
+cat("Mean Percentage Delayed Arrival:", mean_delayed_arrival, "\n")
+cat("Mean Percentage On-Time Departure:", mean_on_time_departure, "\n")
+cat("Mean Percentage On-Time Arrival:", mean_on_time_arrival, "\n")
+# The following code will show the general template to code for the best time for 1999 with plots. 
+```
+### From the above graph and mean percentages, we can observe that Arrival plays a bigger part in the delays. Overall, we can observe that not only are there higher percentages of on time departure flights, lower percentages of delayed departure flights are also reported. Hence in finding the best times to minimise flights, we will be specifically  looking into Arrival flights.
+
+## General formula / code with explanations to find best time using 1999 as the template first
+
+# Filtering out cancelled and diverted flights
+# We fliter out ontime and earlier flights to only look at flights that are delayed 
+```{r}
+df99 <- df99[df99$Diverted == 0 & df99$Cancelled == 0, ]
+
+# Filter the DataFrame to include only delayed flights (ArrDelay > 0)
+df99 <- df99[df99$ArrDelay > 0, ]
+
+```
+
+# Group and aggregate based on their respective year and CRSArrTime and then find AvgArrDelay
+```{r}
+Grouped_ArrDelay99 <- df99 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+```
+### na.rm = True removes any NaN values before calculating the mean and ungroup # helps in easier future manipulation; manipulations applied to whole dataframe instead of each inidividual groups
+
+# Identify best times for each grouped data
+```{r}
+best_times_arr99 <- Grouped_ArrDelay99 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% ### slice_min help to select rows with the least value so in this case is the row with the lowest AvgDelay
+  ungroup()
+```
+
+# Plotting a line plot for ArrDelay vs CRSArrTime in 1 diagram 
+```{r}
+LP99 <- ggplot() +
+  geom_line(data = Grouped_ArrDelay99, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arr99, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) + ### Adding a marker for each line plot to give a visual representation of lowest avgdelay for ArrDelay 
+  labs(x =  'CRSArrTime 24hr format ', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 1999") 
+
+# Display plot
+print(LP99)
+```
+
+
+
+
+### We can observe that there are sudden spikes along the graph possibly due to presence of anomaly / outlier. Hence the following chunk of codes will require us to identify and remove the anomaly 
+
+#### We set up an upper and lower limit for better line graph visualisation 
+
+#### The multiplier 0.7 is often used to set the upper and lower limit. More specifically, 0.7 ensures that we can remove high delay values while making sure that the lower delay limit does not go over zero as we would be removing potental results that shows the lowest delay possible for the dataset
+
+```{R}
+# Calculate upper and lower limits
+upper_Delay_limit <- mean(df99$ArrDelay, na.rm = TRUE) + 0.7 * sd(df99$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df99$ArrDelay, na.rm = TRUE) - 0.7 * sd(df99$ArrDelay, na.rm = TRUE)
+
+# Printing out the values 
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df99[df99$ArrDelay > upper_Delay_limit | df99$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers)
+new_df99 <- df99[df99$ArrDelay <= upper_Delay_limit & df99$ArrDelay >= lower_Delay_limit, ]
+
+# Printing out the values
+cat('Number of outliers:', nrow(df99) - nrow(new_df99), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers 
+NaN_values <- sum(is.na(new_df99$CRSArrTime))
+
+# Printing out the number of NaN values after removing the outliers to check easily
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+```
+### After removing the outliers, we will have to replot and change the inputs from the general template given above 
+```{R}
+Grouped_ArrDelaynew99 <- new_df99 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew99 <- Grouped_ArrDelaynew99 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+LPnew99 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew99, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew99, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 1999") 
+
+# Display plot
+print(LPnew99)
+print(best_times_arrnew99)
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes are more relevant in showing highest delays, we can safely ignore it. However, compared to the uncleaned df graph, we achievied a more reliable graph to show lowest delay. 
+#### From the graph, we can also observe that after 1000 (10am) the graph is generally well distributed with little to no spikes in either higher or lower delays noticable and their average delays are generally between 10-20mins 
+
+
+
+
+# Repeating this code + flitering anomaly for the next 9 years, only changing the year output
+
+# 2000
+
+```{r}
+# Filter 
+df00 <- df00[df00$Diverted == 0 & df00 $Cancelled == 0, ]
+
+df00 <- df00[df00$ArrDelay > 0, ]
+
+
+# Calculate and print upper and lower limits
+upper_Delay_limit <- mean(df00$ArrDelay, na.rm = TRUE) + 0.7 * sd(df00$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df00$ArrDelay, na.rm = TRUE) - 0.7 * sd(df00$ArrDelay, na.rm = TRUE)
+
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df00[df00$ArrDelay > upper_Delay_limit | df00$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers) and print the nnumber of outliers found
+new_df00 <- df00[df00$ArrDelay <= upper_Delay_limit & df00$ArrDelay >= lower_Delay_limit, ]
+
+cat('Number of outliers:', nrow(df00) - nrow(new_df00), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers and print them out for checking
+NaN_values <- sum(is.na(new_df00$CRSArrTime))
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+
+
+# Grouping and finding best times 
+Grouped_ArrDelaynew00 <- new_df00 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew00 <- Grouped_ArrDelaynew00 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+# Plotting average delay against CRSArrTime
+LPnew00 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew00, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew00, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 2000") 
+
+# Display plot
+print(LPnew00)
+print(best_times_arrnew00)
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes are more relevant in showing highest delays, we can safely ignore it.
+#### From the graph, the best time to minimise delay is 350 (3:50am) and 426 (4:26am). Both gives the lowest delay of 1 min
+#### We can also observe that 1000 (10am) onwards, the graph is increasing steady will little to no spikes. 
+#### The graph also shows that after 10am as the scheduled arrival time increases, the average arrival delay surpasses 20mins
+
+
+
+
+
+# 2001
+
+```{r}
+# Fliter
+df01 <- df01[df01$Diverted == 0 & df01$Cancelled == 0, ]
+
+df01 <- df01[df01$ArrDelay > 0, ]
+
+# Calculate and print upper and lower limits
+upper_Delay_limit <- mean(df01$ArrDelay, na.rm = TRUE) + 0.7 * sd(df01$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df01$ArrDelay, na.rm = TRUE) - 0.7 * sd(df01$ArrDelay, na.rm = TRUE)
+
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df01[df01$ArrDelay > upper_Delay_limit | df01$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers) and printing out the number of outliers removed 
+new_df01 <- df01[df01$ArrDelay <= upper_Delay_limit & df01$ArrDelay >= lower_Delay_limit, ]
+
+cat('Number of outliers:', nrow(df01) - nrow(new_df01), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers and printing them out for visual ease 
+NaN_values <- sum(is.na(new_df01$CRSArrTime))
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+
+# Grouping and finding best times 
+Grouped_ArrDelaynew01 <- new_df01 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew01 <- Grouped_ArrDelaynew01 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+# Plotting average delay against CRSArrTime 
+LPnew01 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew01, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew01, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 2001") 
+
+# Display plot
+print(LPnew01)
+print(best_times_arrnew01)
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes that indicates higher delay are more rare, we can safely ignore it as an outlier. 
+#### From the graph, the best timing to minimise delay is 429 (4:29am), giving the lowest delay of 2 minutes
+#### We can observe that after 1000 (10am) the graph shows a steady increase between 10-20mins range in delays as the days timing progressed
+
+
+# 2002
+
+```{r}
+
+# Fliter
+df02 <- df02[df02$Diverted == 0 & df02$Cancelled == 0, ]
+
+df02 <- df02[df02$ArrDelay > 0, ]
+
+# Calculate and print upper and lower limits
+upper_Delay_limit <- mean(df02$ArrDelay, na.rm = TRUE) + 0.7 * sd(df02$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df02$ArrDelay, na.rm = TRUE) - 0.7 * sd(df02$ArrDelay, na.rm = TRUE)
+
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df02[df02$ArrDelay > upper_Delay_limit | df02$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers) and printing out number of outliers removed 
+new_df02 <- df02[df02$ArrDelay <= upper_Delay_limit & df02$ArrDelay >= lower_Delay_limit, ]
+
+cat('Number of outliers:', nrow(df02) - nrow(new_df02), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers and printing them out for ease 
+NaN_values <- sum(is.na(new_df02$CRSArrTime))
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+
+#Grouping and finding best times
+Grouped_ArrDelaynew02 <- new_df02 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew02 <- Grouped_ArrDelaynew02 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+# Plotting average delays against CRSArrTime 
+LPnew02 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew02, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew02, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 2002") 
+
+# Display plot
+print(LPnew02)
+print(best_times_arrnew02)
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes only occurs once for higher delay we can safely ignore it. 
+### From the graph, the best timing to minimise delay is 123 (1:23am) and 425 (4:25am). giving the lowest delay of 1 minute 
+#### The graph shows that the flights generally share the same amount of average delay throughout the day with only the sudden spike in delay occuring near the 500 (5am) mark. 
+
+
+
+# 2003
+
+```{r}
+
+# Fliter
+df03 <- df03[df03$Diverted == 0 & df03$Cancelled == 0, ]
+
+df03 <- df03[df03$ArrDelay > 0, ]
+
+# Calculate and print upper and lower limits
+upper_Delay_limit <- mean(df03$ArrDelay, na.rm = TRUE) + 0.7 * sd(df03$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df03$ArrDelay, na.rm = TRUE) - 0.7 * sd(df03$ArrDelay, na.rm = TRUE)
+
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df03[df03$ArrDelay > upper_Delay_limit | df03$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers) and prining out the number of outliers removed 
+new_df03 <- df03[df03$ArrDelay <= upper_Delay_limit & df03$ArrDelay >= lower_Delay_limit, ]
+
+cat('Number of outliers:', nrow(df03) - nrow(new_df03), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers and printing them out for ease 
+NaN_values <- sum(is.na(new_df03$CRSArrTime))
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+
+# Grouping and finding best times 
+Grouped_ArrDelaynew03 <- new_df03 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew03 <- Grouped_ArrDelaynew03 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+# Plotting average delays against CRSArrTime 
+LPnew03 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew03, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew03, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 2003") 
+
+# Display plot
+print(LPnew03)
+print(best_times_arrnew03)
+
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes that indicates higher delay are more rare, we can safely ignore it as an outlier.
+#### From the graph, the best timings to minimise delays is 407 (4:07am), giving the lowest delay of 1 minute
+#### From the graph, we can observe that after 1000 (10am) the graph has a relatively steady increase of delay
+
+
+
+# 2004
+
+```{r}
+
+# Fliter
+df04 <- df04[df04$Diverted == 0 & df04$Cancelled == 0, ]
+
+df04 <- df04[df04$ArrDelay > 0, ]
+
+# Calculate and printupper and lower limits
+upper_Delay_limit <- mean(df04$ArrDelay, na.rm = TRUE) + 0.7 * sd(df04$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df04$ArrDelay, na.rm = TRUE) - 0.7 * sd(df04$ArrDelay, na.rm = TRUE)
+
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df04[df04$ArrDelay > upper_Delay_limit | df04$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers) and printing the number of outliers removed 
+new_df04 <- df04[df04$ArrDelay <= upper_Delay_limit & df04$ArrDelay >= lower_Delay_limit, ]
+
+cat('Number of outliers:', nrow(df04) - nrow(new_df04), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers and printing them out for ease 
+NaN_values <- sum(is.na(new_df04$CRSArrTime))
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+
+# Grouping and finding best times
+Grouped_ArrDelaynew04 <- new_df04 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew04 <- Grouped_ArrDelaynew04 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+# Plotting average delays against CRSArrTime 
+LPnew04 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew04, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew04, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 2004") 
+
+# Display plot
+print(LPnew04)
+print(best_times_arrnew04)
+
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes that indicates higher delay are more rare, we can safely ignore it as an outlier.
+#### From the graph, the best timings to minimsie delays is 443 ( 4:43am), giving the lowest delay of 3 minutes 
+#### From the graph, we can observe that after 500 (5am) the graph stays relatively constant or experiences little steady increases over time 
+
+
+# 2005
+
+```{r}
+
+# Fliter 
+df05 <- df05[df05$Diverted == 0 & df05$Cancelled == 0, ]
+
+df05 <- df05[df05$ArrDelay > 0, ]
+
+# Calculate and print upper and lower limits
+upper_Delay_limit <- mean(df05$ArrDelay, na.rm = TRUE) + 0.7 * sd(df05$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df05$ArrDelay, na.rm = TRUE) - 0.7 * sd(df05$ArrDelay, na.rm = TRUE)
+
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df05[df05$ArrDelay > upper_Delay_limit | df05$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers) and printing the number of outliers removed 
+new_df05 <- df05[df05$ArrDelay <= upper_Delay_limit & df05$ArrDelay >= lower_Delay_limit, ]
+
+cat('Number of outliers:', nrow(df05) - nrow(new_df05), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers and printing them out for ease 
+NaN_values <- sum(is.na(new_df05$CRSArrTime))
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+
+# Grouping and finding best times 
+Grouped_ArrDelaynew05 <- new_df05 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew05 <- Grouped_ArrDelaynew05 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+# Plotting average delays against CRSArrTime 
+LPnew05 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew05, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew05, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 2005") 
+
+# Display plot
+print(LPnew05)
+print(best_times_arrnew05)
+
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes that indicates higher delay are more rare, we can safely ignore it as an outlier.
+#### From the graph, the best timings to minimise delay is 403 (4:03am), giving the lowest delay of 2 minutes
+#### From the graph, we can observe that after 1000 (10am) the graph stays relatively constant with a steady increase
+
+
+# 2006
+
+```{r}
+
+# Fliter 
+df06 <- df06[df06$Diverted == 0 & df06$Cancelled == 0, ]
+df06 <- df06[df06$ArrDelay > 0, ]
+
+# Calculate and print upper and lower limits
+upper_Delay_limit <- mean(df06$ArrDelay, na.rm = TRUE) + 0.7 * sd(df06$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df06$ArrDelay, na.rm = TRUE) - 0.7 * sd(df06$ArrDelay, na.rm = TRUE)
+
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df06[df06$ArrDelay > upper_Delay_limit | df06$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers) and printing the number of outliers removed 
+new_df06 <- df06[df06$ArrDelay <= upper_Delay_limit & df06$ArrDelay >= lower_Delay_limit, ]
+
+cat('Number of outliers:', nrow(df06) - nrow(new_df06), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers and printing them out for ease
+NaN_values <- sum(is.na(new_df06$CRSArrTime))
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+
+# Grouping and finding best times 
+Grouped_ArrDelaynew06 <- new_df06 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew06 <- Grouped_ArrDelaynew06 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+# Plotting average delays against CRSArrTime 
+LPnew06 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew06, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew06, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 2006") 
+
+# Display plot
+print(LPnew06)
+print(best_times_arrnew06)
+
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes that indicates higher delay are more rare, we can safely ignore it as an outlier
+#### From the graph, the best timings to minimise delay is 340 (3:40am) and 452 (4:52am), giving the lowest delay of 1 minute
+#### From the graph, we can observe that after 1000 (10am) the graph has a constant steady increase 
+
+
+
+
+# 2007
+
+```{r}
+
+# Fliter 
+df07 <- df07[df07$Diverted == 0 & df07$Cancelled == 0, ]
+
+df07 <- df07[df07$ArrDelay > 0, ]
+
+# Calculate and print upper and lower limits
+upper_Delay_limit <- mean(df07$ArrDelay, na.rm = TRUE) + 0.7 * sd(df07$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df07$ArrDelay, na.rm = TRUE) - 0.7 * sd(df07$ArrDelay, na.rm = TRUE)
+
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df07[df07$ArrDelay > upper_Delay_limit | df07$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers) and printing the number of outliers out 
+new_df07 <- df07[df07$ArrDelay <= upper_Delay_limit & df07$ArrDelay >= lower_Delay_limit, ]
+
+cat('Number of outliers:', nrow(df07) - nrow(new_df07), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers and printing them out with ease 
+NaN_values <- sum(is.na(new_df07$CRSArrTime))
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+
+# Grouping and finding best times
+Grouped_ArrDelaynew07 <- new_df07 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew07 <- Grouped_ArrDelaynew07 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+# Plotting average delays against CRSArrTime 
+LPnew07 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew07, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew07, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 2007") 
+
+# Display plot
+print(LPnew07)
+print(best_times_arrnew07)
+
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes that indicates higher delay are more rare, we can safely ignore it as an outlier.
+#### From the graph, the best timings to minimise delay is 141 (1:41am), 225(2:25am), 310(3:10am), 449(4:49am), giving the lowest delay of 4 minutes 
+#### From the graph, we can observe that after 1000 (10am) the graph stays relatively constant with steady increases
+#### The graph also shows that the flights in 2007 generally have a lower amount of delay times
+
+
+
+
+# 2008
+
+```{r}
+
+# Fliter
+df08 <- df08[df08$Diverted == 0 & df08$Cancelled == 0, ]
+
+df08 <- df08[df08$ArrDelay > 0, ]
+
+# Calculate and print upper and lower limits
+upper_Delay_limit <- mean(df08$ArrDelay, na.rm = TRUE) + 0.7 * sd(df08$ArrDelay, na.rm = TRUE)
+lower_Delay_limit <- mean(df08$ArrDelay, na.rm = TRUE) - 0.7 * sd(df08$ArrDelay, na.rm = TRUE)
+
+cat('upper_Delay_limit:', upper_Delay_limit, '\n')
+cat('lower_Delay_limit:', lower_Delay_limit, '\n')
+
+# Identify outliers
+outliers <- df08[df08$ArrDelay > upper_Delay_limit | df08$ArrDelay < lower_Delay_limit, ]
+
+# Trimming (removing outliers) and printing the number of outliers removed out 
+new_df08 <- df08[df08$ArrDelay <= upper_Delay_limit & df08$ArrDelay >= lower_Delay_limit, ]
+
+cat('Number of outliers:', nrow(df08) - nrow(new_df08), '\n')
+
+# Check for NaN values in CRSArrTime column after removing outliers and printing them out for ease 
+NaN_values <- sum(is.na(new_df08$CRSArrTime))
+cat("Number of NaN values in 'CRSArrTime' column after removing outliers:", NaN_values, '\n')
+
+# Grouping and finding best times 
+Grouped_ArrDelaynew08 <- new_df08 %>%
+  group_by(Year, CRSArrTime) %>%
+  summarise(AvgDelay = mean(ArrDelay, na.rm = TRUE)) %>% 
+  ungroup() 
+
+best_times_arrnew08 <- Grouped_ArrDelaynew08 %>%
+  group_by(Year) %>%
+  slice_min(AvgDelay) %>% 
+  ungroup()
+
+# Plotting average delays against CRSArrTime 
+LPnew08 <- ggplot() +
+  geom_line(data = Grouped_ArrDelaynew06, mapping = aes(x = CRSArrTime, y = AvgDelay, color = 'pink'), alpha = 0.6, linetype = "solid") +
+  
+  geom_point(data = best_times_arrnew06, aes(x = CRSArrTime, y = AvgDelay), color = 'orange', size = 3, shape = 16) +
+  labs(x = 'CRSArrTime 24hr format', y = 'AvgDelay minutes', title = "Average Delay in scheduled Arrival timings in 2008") 
+
+# Display plot
+print(LPnew08)
+print(best_times_arrnew08)
+
+```
+#### It is oberservable that even after cleaning out, the graph still shows sudden spikes. But since the sudden spikes that indicates higher delay are more rare, we can safely ignore it as an outlier.
+#### From the graph, the best timings to minimise delay is 154 (1:54am), giving the lowest delay of 1 minutes 
+#### From the graph, we can observe that after 1000 (10am) the graph stays relatively constant with steady increase
+
+
+## CONDENSING 10 YEARS INTO 1 DIAGRAM
+
+# Combine dataframes into a list and fliter out Diverted == 1 and Cancelled == 1 as we are analysisng the normal / usual flight data timings. We also fliter the dataframes to keep only ArrDelay and CRSArrTime columns 
+```{r}
+# Combine dataframes into a list
+dfs_total_Arr <- list(
+  filter(df99, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime),
+  filter(df00, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime),
+  filter(df01, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime),
+  filter(df02, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime),
+  filter(df03, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime),
+  filter(df04, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime),
+  filter(df05, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime),
+  filter(df06, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime),
+  filter(df07, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime),
+  filter(df08, Diverted == 0 & Cancelled == 0) %>% select(ArrDelay, Year, CRSArrTime)
+)
+```
+
+
+# Making the Time intervals 
+
+#### We will categorise the timings into different parts of the day. The timings are categorised using the 24hr format, according to how CRSArrTime data is inputed. This is done via making a categorise_time function and separating the different timings on the day into its relevant categories 
+
+#### We then apply the categorise_time function into the CRSArrTime column to categorise the timings in there to the different parts of the day 
+
+#### A new column named ArrivalTimeInterval is created storing the named categories of the CRSArrTime column for easier comparison 
+
+#### At the end we print out the dfs_total_Arr dataframe to ensure the CRSArrTimeInterval has been properly implemented 
+```{r}
+# Function to categorise arrival time interval 
+categorise_time <- function(time) {
+  cut(time, breaks = c(-Inf, 600, 1200, 1800, 2400), labels = c("Night", "Morning", "Afternoon", "Evening"))
+}
+
+# Apply categorisation function to each data frame in the list
+dfs_total_Arr <- lapply(dfs_total_Arr, function(df) {
+  df$ArrivalTimeInterval <- categorise_time(df$CRSArrTime)
+  return(df)
+})
+
+
+# Print the resulting list of data frames
+print(dfs_total_Arr)
+```
+
+
+# Group by 'TimeCategory' and calculate relevant statistics
+
+#### We combine the above lists of dfs_total_Arr into a single data frame called df_combined 
+
+#### We create a new dataframe called Time_Interval_data that consist of the grouped ArrivalTimeInterval column, total number of flights, total sum of ArrDelay, Number of delayed flights and the percentage of delayed flights 
+
+#### For the 10 years condensed data, we proceed to also ensure the delays are  > 0
+
+#### To ensure easier readability of the dataframe, we made sure that when the Time_Interval_data is printed, the ArrivalTImeInterval categories are listed in the correct order of how the day progresses
+```{r}
+# Combine the list into a single data frame
+df_combined <- do.call(rbind, dfs_total_Arr)
+
+# Group by 'ArrivalTimeInterval' and calculate relevant statistics
+Time_Interval_data <- df_combined %>%
+  group_by(ArrivalTimeInterval) %>%
+  summarise(
+    Flights = n(),
+    Total_Arr_Delay = sum(ArrDelay, na.rm = TRUE),
+    Delays = sum(ArrDelay > 0, na.rm = TRUE),
+    Delayed_percent = (Delays / Flights) * 100
+  ) %>%
+  mutate(
+    ArrivalTimeInterval = factor(ArrivalTimeInterval, levels = c('Night', 'Morning', 'Afternoon', 'Evening'), ordered = TRUE)
+  ) %>%
+  arrange(ArrivalTimeInterval)
+
+# Print the resulting DataFrame
+print(Time_Interval_data)
+```
+
+
+# Plotting the graph
+
+#### We now plot the bar graph to showing the percentage of delayed flights across the different time interval / categories. The percentage of delayed flights consisits of 10 years worth of data condensed into 1. 
+```{r}
+LPT <- ggplot(Time_Interval_data, aes(x = ArrivalTimeInterval, y = Delayed_percent, fill = ArrivalTimeInterval)) +
+  geom_bar(stat = "identity") + 
+  geom_text(aes(label = paste0(round(Delayed_percent, 2), "%")), vjust = -0.5) +  # Round percentage to 2dp and is labelled on top of each bar graph for easier visualisation
+  labs(x = "Time Interval", y = "% Delayed", title = "Percentage of Delays per Time Interval across all 10 years") +  # Add labels and title
+  scale_fill_viridis_d() +  # Use HUSL color palette (same palette used in python)
+  theme_minimal() +  # Apply minimal theme
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+print(LPT)
+
+```
+
+#### From the graph, it shows that morning time experiences lower % of delays, However, from individual years, the best timings to minimise delays occurs during the night time. Hence, there might be another underlying reason for such results to be shown
+
+
+
+## BEST DAYS OF WEEK TO MINIMISE DELAY 
+
+# General formula with step by step explanation using 1999 as the template 
+
+#### For best days, we do not need to disect each variable for comparison. Instead we look which day of the week is best to minimise delays; the delay in this case is adding the DepDelay and ArrDelay together 
+
+### We have to reread and fliter the df again as labelling like df99 results in an empty dataset
+
+#### After reading the year csv, we filter away the diverted and cancelled flights (ie. keeping Diverted ==0 and Cancelled ==0) , there is no need to additionally fliter columns that we want 
+
+
+
+# Reading and flitering 
+```{r}
+df <- read.csv("1999.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% filter(ArrDelay > 0 & DepDelay > 0)
+```
+
+
+# Mapping out all days of the week and reordering
+
+#### We map out the days of the week and indirectly apply numbering to it as list it in the correct order so that we can apply actual days into the DayOfWeek column as that column only has values between 1-7 inputed
+```{R}
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+```
+
+# Group by day of the week and calculate mean delay 
+#### We then creat a day_mean dataset that consist of DayOfWeek and the mean of DepDelay and mean of ArrDelay
+
+#### We proceed to add these 2 delays into 1 delay and find the mean of the 2 to get the Avg_delay column and then we find the best day by finding which day has the lowest Avg_delay
+```{R}
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Find the best day with the lowest average delay
+
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+```
+
+# Plotting a bar graph to show a easy visual representation of the Avg_delays per day. There is also a red circle as a marker to immediately make it clear which day is the best day to minimise delay. There is also the values (in minutes) on top of each bar graph for easy value visualisation 
+```{R}
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) + # A marker to show which day has the lowest delay 
+  labs(title = "Average Delay by Day of the Week 1999",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+
+#### From the bar graph we can observe that Friday experiences the highest average delays of 35 minutes followed by Thursday. While Tuesday and Sunday experiences the lowest average delays with litte differences of 32.3 minutes and 32.4 minutes respectively
+
+
+# 2000 
+
+```{r}
+
+# Read the csv
+df <- read.csv("2000.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% 
+  filter(ArrDelay > 0 & DepDelay > 0)
+
+# Mapping 
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+
+# Group and calculate mean
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Identifying best day
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+
+# Plotting
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) +
+  labs(title = "Average Delay by Day of the Week 2000",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+#### From the bar graph we can observe that Friday experiences the highest average delays of 39.8 minutes followed by Thursday. While Tuesday and Saturday experiences the lowest average delays with only a difference of 0.5 minutes 
+
+# 2001
+
+```{r}
+# Read the csv
+df <- read.csv("2001.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% 
+  filter(ArrDelay > 0 & DepDelay > 0)
+
+# Mapping 
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+
+# Group and calculate mean
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Identifying best day
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+
+# Plotting
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) +
+  labs(title = "Average Delay by Day of the Week 2001",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+#### From the bar graph we can observe that Friday experiences the highest average delays of 35.4 minutes. While Tuesday experiences the lowest average delays of 31.7 minutes. We can also observe that Monday, Wednesday, Saturday and Sunday have generally have the same amount of average delay as well.
+
+
+# 2002
+
+```{r}
+
+# Read the csv
+df <- read.csv("2002.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% 
+  filter(ArrDelay > 0 & DepDelay > 0)
+
+# Mapping 
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+
+# Group and calculate mean
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Identifying best day
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+
+# Plotting
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) +
+  labs(title = "Average Delay by Day of the Week 2002",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+#### From the bar graph we can observe that Tuesday experiences the highest average delays of 32.3 minutes followed by Thursday. While Saturday significantly experiences the lowest average delays of 28.1 minutes 
+
+
+# 2003
+
+```{r}
+
+# Read the csv 
+df <- read.csv("2003.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% 
+  filter(ArrDelay > 0 & DepDelay > 0)
+
+# Mapping 
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+
+# Group and calculate mean
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Identifying best day
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+
+# Plotting
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) +
+  labs(title = "Average Delay by Day of the Week 2003",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+#### From the bar graph we can observe that Sunday experiences the highest average delays of 35 minutes. While Saturday significantly experiences the lowest average delaysof 30.4 minutes 
+
+
+# 2004
+
+```{r}
+
+# Read the csv 
+df <- read.csv("2004.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% 
+  filter(ArrDelay > 0 & DepDelay > 0)
+
+# Mapping 
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+
+# Group and calculate mean
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Identifying best day
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+
+# Plotting
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) +
+  labs(title = "Average Delay by Day of the Week 2004",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+#### From the bar graph we can observe that Wednesday and Monday have the highest average delays of 38 minutes and 38.2 minutes. While Saturday significantly experiences the lowest average delays of 32.3minutes
+
+# 2005
+
+```{r}
+
+# Read the csv
+df <- read.csv("2005.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% 
+  filter(ArrDelay > 0 & DepDelay > 0)
+
+# Mapping 
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+
+# Group and calculate mean
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Identifying best day
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+
+# Plotting
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) +
+  labs(title = "Average Delay by Day of the Week 2005",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+
+#### From the bar graph we can observe that Wednesday experiences the highest average delays of 38.9 minutes followed closely by Thursday and Monday. While Saturday significantly experiences the lowest average delays of 33.9 minutes 
+
+
+# 2006
+
+```{r}
+
+# Read the csv
+df <- read.csv("2006.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% 
+  filter(ArrDelay > 0 & DepDelay > 0)
+
+# Mapping 
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+
+# Group and calculate mean
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Identifying best day
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+
+# Plotting
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) +
+  labs(title = "Average Delay by Day of the Week 2006",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+#### From the bar graph we can observe that Friday and Thursday experiences the highest average delays of 40.6 minutes and 40.7 minutes respectively. While Saturday experiences the lowest average delays of 35.5 minutes
+
+
+# 2007
+
+```{r}
+
+# Read the csv
+df <- read.csv("2007.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% 
+  filter(ArrDelay > 0 & DepDelay > 0)
+
+# Mapping 
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+
+# Group and calculate mean
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Identifying best day
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+
+# Plotting
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) +
+  labs(title = "Average Delay by Day of the Week 2007",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+
+#### From the bar graph we can observe that Thursday experiences the highest average delays of 42.1 minutes followed closely by Friday and Wednesday with both having delays of 40.8 minutes. While Saturday experiences the lowest average delays 0f 36.4 minutes. 
+
+
+# 2008
+
+```{r}
+
+# Read the csv
+df <- read.csv("2008.csv")
+df <- df[df$Diverted == 0 & df$Cancelled == 0, ]
+# Filter the DataFrame to include only delayed flights
+df <- df %>% 
+  filter(ArrDelay > 0 & DepDelay > 0)
+
+# Mapping 
+day_mapping <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+df$DayOfWeek <- factor(day_mapping[df$DayOfWeek], levels = day_mapping)
+
+# Group and calculate mean
+day_mean <- df %>%
+  group_by(DayOfWeek) %>%
+  summarise(Avg_DepDelay = mean(DepDelay),
+            Avg_ArrDelay = mean(ArrDelay),
+            Avg_delay = (Avg_DepDelay + Avg_ArrDelay) / 2)
+
+# Identifying best day
+best_day <- day_mean$DayOfWeek[which.min(day_mean$Avg_delay)]
+
+# Plotting
+ggplot(day_mean, aes(x = DayOfWeek, y = Avg_delay)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  geom_text(aes(label = round(Avg_delay, 1)), vjust = -0.5) +
+  geom_point(data = day_mean[day_mean$DayOfWeek == best_day, ], aes(x = DayOfWeek, y = Avg_delay), color = "red", size = 4) +
+  labs(title = "Average Delay by Day of the Week 2008",
+       x = "Day of the Week",
+       y = "Average Delay (minutes)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = day_mean$Avg_delay[which.min(day_mean$Avg_delay)], linetype = "dashed", color = "red") +
+  theme_minimal()
+```
+
+
+#### From the bar graph we can observe that Tuesday experiences the highest average delays of 44.2 minutes. While Wednesday and Thursday experiences the lowest average delays with a difference of only 0.1 minutes. Saturday and Sunday have similiar average delays
+
