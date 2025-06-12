@@ -18,14 +18,17 @@ We analysed 10 years of U.S. flight data to identify when flights are least like
 Key Insights:
 Best Time of Day: While Night flights showed the lowest delays in several individual years, when aggregated across all 10 years, Morning flights had the lowest overall delay percentage. This suggests that the best time to fly differs in short-term trends or long-term patterns. 
 Best Day of the Week: Both individual year plots and the 10-year summary indicate that Saturday consistently has the lowest average flight delays. 
+
 How to Run: 
 All relevant packages are loaded, and the analysis is fully implemented in both Python and R. Each code chunk includes detailed explanations to guide you through the steps — from data cleaning and wrangling to visualisation and insights. To replicate the analysis, simply follow the code chunks in order within your R or Python environment, ensuring the dataset files are correctly loaded.
 
 ## Do older planes suffer more delays on a year-to-year basis
 Overview: 
 We defined a threshold to classify planes as either younger or older. Using this classification, we calculated the average total delay (Arrival + Departure) and plotted the results for individual years. To analyse the full 10-year dataset efficiently, we split the period into two halves (first 5 years and last 5 years), repeating the same steps.
+
 Key Insights: 
 There's little to no difference between younger and older in both yearly and aggregated visualisations. On average, younger planes do experience more delays - by 1%, which is likely insignificant
+
 How to run:
 All relevant packages are loaded, and the analysis is fully implemented in both Python and R. Each code chunk includes detailed explanations to guide you through the steps — from data cleaning and wrangling to visualization and insights. To replicate the analysis, simply follow the code chunks in order within your R or Python environment, ensuring the dataset files are correctly loaded.
 
