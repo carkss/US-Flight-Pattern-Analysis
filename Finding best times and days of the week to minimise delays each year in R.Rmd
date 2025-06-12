@@ -1,5 +1,5 @@
 ---
-title: "ST 2195 Coursework Part 2 a)"
+title: "US flight patterns"
 output: html_document
 date: "2024-03-17"
 ---
