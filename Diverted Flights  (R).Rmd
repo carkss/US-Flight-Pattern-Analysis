@@ -1,5 +1,5 @@
 ---
-title: "ST 2195 Coursework part 2 c)"
+title: "Diverted flights Logistic Regression Model"
 output: html_document
 date: "2024-03-23"
 ---
