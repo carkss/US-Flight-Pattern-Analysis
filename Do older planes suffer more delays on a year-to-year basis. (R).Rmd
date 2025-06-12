@@ -1,0 +1,1307 @@
+---
+title: " Do older planes suffer more delays on a year-to-year basis."
+output: html_document
+date: "2024-03-19"
+---
+
+```{r}
+install.packages("tidyverse")
+install.packages("lubridate")
+install.packages("readr")
+## Install these packages if needed 
+```
+
+# Evaluating whether older planes suffer more delays
+
+
+```{r}
+library(tidyverse) # contains packages like dplyr and ggplot for data manipulation and plotting 
+library(lubridate)  # For easier dates and times manuipulation
+library(readr)  # For reading the CSV files
+```
+## set the working directory to souce file location / the location to where the relevant year csvs and other csvs are located at to read the dataframes
+
+# EVALUATE WHETHER OLDER PLANES SUFFER MORE DELAYS ON A YEAR-TO-YEAR BASIS
+
+## General formula with explanation with 1999 as a formula
+
+# Read plane data
+```{r}
+plane_data <- read.csv("plane-data.csv")
+```
+
+# Manipulating and flitering the plane_data
+
+
+#### We first convert the year column into a datetime for easier manipulation in the future using the as.date function in r 
+
+#### Lastly, we fliter to keep planes that are manufactured 1999 and before. This changes with every year and remove any NaN values in plane data 
+```{r}
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y") # as.character converts the 'year' column into character vectors. Then the as.Date is used to convert these character vectors into a date object. format = %Y changes the year input into yy-mm-dd instead of the 4 year digit. This is done to fliter out interested year easier
+
+# Filter out planes manufactured before 1999
+plane_data <- plane_data[year(plane_data$year) <= 1999,]
+
+# Calculate the age of planes by 1999
+plane_data$AgeAt1999 <- 1999 - as.integer(format(plane_data$year, "%Y")) # format is used to extract the 4 digit year and as.integer is used to change the character vector into integers for subtraction to work 
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]   # this code has to be here and not before converting and flitering to prevent making the whole data to have only NaN values
+
+# Print 'year' and 'AgeAt1999' columns
+print(plane_data[c('year', 'AgeAt1999')])
+
+```
+
+
+# Creating and classifiying planes into older and younger
+
+#### We first define the threshold_age (this threshold_age changes based on plane age at different years)
+
+#### Then, we create a new column called PlaneCategory to catergorise the planes age as either older or younger based on the threshold
+```{r}
+# Define the threshold age
+threshold_age <- 11
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt1999 >= threshold_age, 'Older', 'Younger')
+
+print(plane_data) # To check whether the PlaneCategory has been properly added
+```
+
+# Read flight data
+```{r}
+df99 <- read.csv("1999.csv")
+```
+
+# Filter out cancelled and diverted flights
+```{r}
+df99 <- df99[df99$Diverted == 0 & df99$Cancelled == 0,]
+```
+
+# Merging plane and flight data
+```{r}
+# Rename 'tailnum' column in plane_data to match the 'TailNum' column in the flight data (df_)
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df99, by="TailNum")
+```
+
+# Calculating mean total delays for older and younger planes each
+
+### The following code will be trying to visualise / plot bar graph to show mean Delay between older and younger planes. We don not remove ontime or earlier flights as we are firstly viewing the older and younger planes delay in a big picture 
+
+#### To calculate delay, we add the ArrDelay and DepDelay together to create a Delay column
+
+#### From the merged_data, we separate the younger and older planes into their own dataframe 
+
+#### In each of the younger and older planes dataframe we group to make sure the planes are in their respective category and then we get the mean of the newly made Delay column
+```{r}
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and find mean / average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+```
+
+# Plot bar graph for average delays for older and younger planes. The average delays are in minutes 
+```{r}
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delays
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") + # This adds in the bar into the graph
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) + # This prints out the calculated values on the top of each bar 
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 1999") + # Labelling
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal() # Organises the graph 
+```
+
+#### We can oberseve that overall Younger planes experiences slightly higher delays and this could be due to many reasons like  having lower numbers of ontime or earlier flights or the when younger planes depart or arrive early, they are not as early as older planes
+
+
+### The following codes will be trying to narrow down the reasonings for the above results. Hence, we will be identifying percentage of delayed flights between older and younger planes 
+
+### In this section, we will specifically be looking at delayed flights (i.e Delay ( Arrival + departure ) > 0 ) 
+
+### To keep consistency, we chose to look at specifically Delay > 0 to count as a delayed flight as not only does it represent the full delay a flight might incurr during its route, but in our previous average Delay graph, it is also showing the full delay per route but without removing potential ontime or earlier flights
+
+#### We first find the total number of delayed flights in each category and then we divide it by the number of rows in older_planes_cleaned ( contains ontime , earlier and delayed flights) and we multiply it by 100 to get the percentages and the %s are printed for easier viewing 
+
+
+
+
+
+
+# Calculating % of total flights that are delayed for both older and younger planes
+```{r}
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+```
+
+# Plotting the percentage of delayed flights between older and younger planes
+```{r}
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 1999") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+#### From the graph, young planes experiences roughly 3% more delayed flights than older planes, thus also meaning that they have around 3% lesser ontime and earlier flights. Thus, explains why in the bar graph showing the overall average delay, younger planes have a higher value 
+
+# REPEATING THIS TEMPLATE FOR THE NEXT 9 YEARS OF DATA, ONLY CHANGING YEAR INPUT AND THRESHOLD_AGE
+
+# 2000
+```{r}
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Filter out planes manufactured before 2000
+plane_data <- plane_data[year(plane_data$year) <= 2000,]
+
+# Calculate the age of planes by 2000
+plane_data$AgeAt2000 <- 2000 - as.integer(format(plane_data$year, "%Y"))
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]
+
+# Print 'year' and 'AgeAt2000' columns
+print(plane_data[c('year', 'AgeAt2000')])
+
+# Define the threshold age
+threshold_age <- 11
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt2000 >= threshold_age, 'Older', 'Younger')
+print(plane_data) # To check whether the PlaneCategory has been properly added
+
+df00 <- read.csv("2000.csv")
+
+# Filter out cancelled and diverted flights
+df00 <- df00[df00$Diverted == 0 & df00$Cancelled == 0,]
+
+# Rename 'tailnum' column to match flight data
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df00, by="TailNum")
+
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and aggregate average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delay
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 2000") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+
+# Calculating % of total flights that are delayed for both older and younger planes
+
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+
+# Plotting for percentage of delayed flights
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 2000") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+#### In the average delay graph, younger planes experiences higher delays and this is backed by the percentage of delayed flights graph where more than half of the younger planes experiences delays
+
+#### The % graph also shows that the younger planes has about 4% more delayed flights than the older
+
+
+
+# 2001
+```{r}
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Filter out planes manufactured before 2001
+plane_data <- plane_data[year(plane_data$year) <= 2001,]
+
+# Calculate the age of planes by 2001
+plane_data$AgeAt2001 <- 2001 - as.integer(format(plane_data$year, "%Y"))
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]
+
+# Print 'year' and 'AgeAt2001' columns
+print(plane_data[c('year', 'AgeAt2001')])
+
+# Define the threshold age
+threshold_age <- 11
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt2001 >= threshold_age, 'Older', 'Younger')
+print(plane_data) # To check whether the PlaneCategory has been properly added
+
+df01 <- read.csv("2001.csv")
+
+# Filter out cancelled and diverted flights
+df01 <- df01[df01$Diverted == 0 & df01$Cancelled == 0,]
+
+# Rename 'tailnum' column to match flight data
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df01, by="TailNum")
+
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and aggregate average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delay
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 2001") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+
+# Calculating % of total flights that are delayed for both older and younger planes
+
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+
+# Plotting for percentage of delayed flights
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 2001") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+#### The average delay graph shows that older planes experiences higher delay, supported by the % graph that shows that older planes has a higher % of delayed flights
+
+#### However, in the % graph, older and younger planes only have a 0.04% difference but in the average delay graph older planes has almost 2 more minutes in average delay than younger planes. As such, a more prominent reasoning for older planes having higher average delay timings could be either having less ontime flights or the values representing earlier flights in older planes are not as low as the ones in younger planes
+
+# 2002
+```{r}
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Filter out planes manufactured before 2002
+plane_data <- plane_data[year(plane_data$year) <= 2002,]
+
+# Calculate the age of planes by 2002
+plane_data$AgeAt2002 <- 2002 - as.integer(format(plane_data$year, "%Y"))
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]
+
+# Print 'year' and 'AgeAt2002' columns
+print(plane_data[c('year', 'AgeAt2002')])
+
+# Define the threshold age
+threshold_age <- 14 # decided upon printing out the plane_data to get an gauge of the average age 
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt2002 >= threshold_age, 'Older', 'Younger')
+print(plane_data) # To check whether the PlaneCategory has been properly added
+
+df02 <- read.csv("2002.csv")
+
+# Filter out cancelled and diverted flights
+df02 <- df02[df02$Diverted == 0 & df02$Cancelled == 0,]
+
+# Rename 'tailnum' column to match flight data
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df02, by="TailNum")
+
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and aggregate average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delay
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 2002") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+
+# Calculating % of total flights that are delayed for both older and younger planes
+
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+
+# Plotting for percentage of delayed flights
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 2002") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+
+
+#### From the average delay graph, older planes has higher delay than younger. However, in the % graph, it shows that younger planes have a 4 higher % of delayed flights. 
+
+#### This could mean that for younger planes, they have more ontime flights or the values for earlier flights are lower than the oens in older planes, hence brining downn younger planes average delays 
+
+
+# 2003
+```{r}
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Filter out planes manufactured before 2003
+plane_data <- plane_data[year(plane_data$year) <= 2003,]
+
+# Calculate the age of planes by 2003
+plane_data$AgeAt2003 <- 2003 - as.integer(format(plane_data$year, "%Y"))
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]
+
+# Print 'year' and 'AgeAt2003' columns
+print(plane_data[c('year', 'AgeAt2003')])
+
+# Define the threshold age
+threshold_age <- 14
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt2003 >= threshold_age, 'Older', 'Younger')
+print(plane_data) # To check whether the PlaneCategory has been properly added
+
+df03<- read.csv("2003.csv")
+
+# Filter out cancelled and diverted flights
+df03 <- df03[df03$Diverted == 0 & df03$Cancelled == 0,]
+
+# Rename 'tailnum' column to match flight data
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df03, by="TailNum")
+
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and aggregate average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delay
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 2003") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+
+# Calculating % of total flights that are delayed for both older and younger planes
+
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+
+# Plotting for percentage of delayed flights
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 2003") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+
+
+#### From average delay graph, younger planes experiences higher delays and is supported by the % graph where younger planes have higher % of delayed flights. 
+
+#### In the % graph, younger planes have about 1% higher delayed flights and from the average delay graph, younger planes have about 1 minute more in average delays as well. Overall, these % and timings support each other
+
+
+# 2004
+```{r}
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Filter out planes manufactured before 2004
+plane_data <- plane_data[year(plane_data$year) <= 2004,]
+
+# Calculate the age of planes by 2004
+plane_data$AgeAt2004 <- 2004 - as.integer(format(plane_data$year, "%Y"))
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]
+
+# Print 'year' and 'AgeAt2004' columns
+print(plane_data[c('year', 'AgeAt2004')])
+
+# Define the threshold age
+threshold_age <- 15 
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt2004 >= threshold_age, 'Older', 'Younger')
+print(plane_data) # To check whether the PlaneCategory has been properly added
+
+df04<- read.csv("2004.csv")
+
+# Filter out cancelled and diverted flights
+df04 <- df04[df04$Diverted == 0 & df04$Cancelled == 0,]
+
+# Rename 'tailnum' column to match flight data
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df04, by="TailNum")
+
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and aggregate average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delay
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 2004") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+
+# Calculating % of total flights that are delayed for both older and younger planes
+
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+
+# Plotting for percentage of delayed flights
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 2004") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+
+#### The average delay graph shows that older planes suffer more delays and is backed by the % graph where older planes have a higher % of delayed flights 
+
+#### older planes has about a 2% higher delayed flights and it does correlate to older planes experiencing about 2 mins more average delays
+
+
+# 2005
+```{r}
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Filter out planes manufactured before 2005
+plane_data <- plane_data[year(plane_data$year) <= 2005,]
+
+# Calculate the age of planes by 2005
+plane_data$AgeAt2005 <- 2005 - as.integer(format(plane_data$year, "%Y"))
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]
+
+# Print 'year' and 'AgeAt2005' columns
+print(plane_data[c('year', 'AgeAt2005')])
+
+# Define the threshold age
+threshold_age <- 16
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt2005 >= threshold_age, 'Older', 'Younger')
+print(plane_data) # To check whether the PlaneCategory has been properly added
+
+df05<- read.csv("2005.csv")
+
+# Filter out cancelled and diverted flights
+df05 <- df05[df05$Diverted == 0 & df05$Cancelled == 0,]
+
+# Rename 'tailnum' column to match flight data
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df05, by="TailNum")
+
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and aggregate average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delay
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 2005") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+
+# Calculating % of total flights that are delayed for both older and younger planes
+
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+
+# Plotting for percentage of delayed flights
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 2005") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+
+
+#### From the graph, older planes experiences higher average delay and this is backed by older planes also experiencing higher % of delayed flights as well
+
+#### older planes has about a 1% higher delayed flights and it does correlate to older planes experiencing about 1 mins more average delays
+
+
+# 2006
+```{r}
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Filter out planes manufactured before 2006
+plane_data <- plane_data[year(plane_data$year) <= 2006,]
+
+# Calculate the age of planes by 2006
+plane_data$AgeAt2006 <- 2006 - as.integer(format(plane_data$year, "%Y"))
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]
+
+# Print 'year' and 'AgeAt2006' columns
+print(plane_data[c('year', 'AgeAt2006')])
+
+# Define the threshold age
+threshold_age <- 18
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt2006 >= threshold_age, 'Older', 'Younger')
+print(plane_data) # To check whether the PlaneCategory has been properly added
+
+df06<- read.csv("2006.csv")
+
+# Filter out cancelled and diverted flights
+df06 <- df06[df06$Diverted == 0 & df06$Cancelled == 0,]
+
+# Rename 'tailnum' column to match flight data
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df06, by="TailNum")
+
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and aggregate average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delay
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 2006") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+
+# Calculating % of total flights that are delayed for both older and younger planes
+
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+
+# Plotting for percentage of delayed flights
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 2006") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+
+#### Younger planes experience higher average delay but in the % graph, younger planes have negligibly lower % of delayed flights
+
+#### This results could be due to younger planes having lesser ontime flights or their earlier flights timings could be higher compared to those in older planes 
+
+
+# 2007
+```{r}
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Filter out planes manufactured before 2007
+plane_data <- plane_data[year(plane_data$year) <= 2007,]
+
+# Calculate the age of planes by 2007
+plane_data$AgeAt2007 <- 2007 - as.integer(format(plane_data$year, "%Y"))
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]
+
+# Print 'year' and 'AgeAt2007' columns
+print(plane_data[c('year', 'AgeAt2007')])
+
+# Define the threshold age
+threshold_age <- 20
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt2007 >= threshold_age, 'Older', 'Younger')
+print(plane_data) # To check whether the PlaneCategory has been properly added
+
+df07<- read.csv("2007.csv")
+
+# Filter out cancelled and diverted flights
+df07 <- df07[df07$Diverted == 0 & df07$Cancelled == 0,]
+
+# Rename 'tailnum' column to match flight data
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df07, by="TailNum")
+
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and aggregate average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delay
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 2007") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+
+# Calculating % of total flights that are delayed for both older and younger planes
+
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+
+# Plotting for percentage of delayed flights
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 2007") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+
+#### Older planes suffer more delays based on both in average delays and % of delayed flights, older planes have a higher value and %
+
+#### However, in the % graph, older planes has about 3% more delayed flights but in average delay graph the difference is about 1.4 minutes. This could mean that even thought older planes have more % of delayed flights, their ontime flights or earlier flights are more or low enough respectively to get a lower average delay than what it should be. 
+
+
+# 2008
+```{r}
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Filter out planes manufactured before 2008
+plane_data <- plane_data[year(plane_data$year) <= 2007,]
+
+# Calculate the age of planes by 2008
+plane_data$AgeAt2008 <- 2008 - as.integer(format(plane_data$year, "%Y"))
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year),]
+
+# Print 'year' and 'AgeAt2008' columns
+print(plane_data[c('year', 'AgeAt2008')])
+
+# Define the threshold age
+threshold_age <- 20
+
+# Create a new column 'PlaneCategory' to categorize planes as 'Older' or 'Younger'
+plane_data$PlaneCategory <- ifelse(plane_data$AgeAt2008 >= threshold_age, 'Older', 'Younger')
+print(plane_data) # To check whether the PlaneCategory has been properly added
+
+df08<- read.csv("2008.csv")
+
+# Filter out cancelled and diverted flights
+df08 <- df08[df08$Diverted == 0 & df08$Cancelled == 0,]
+
+# Rename 'tailnum' column to match flight data
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge plane and flight data
+merged_data <- merge(plane_data, df08, by="TailNum")
+
+# Calculate total delays
+merged_data$Delay <- merged_data$ArrDelay + merged_data$DepDelay
+
+# Separate older and younger planes
+older_planes <- merged_data[merged_data$PlaneCategory == 'Older',]
+younger_planes <- merged_data[merged_data$PlaneCategory == 'Younger',]
+
+# Group and aggregate average delays
+older_avgdelays <- older_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+younger_avgdelays <- younger_planes %>%
+  group_by(PlaneCategory) %>%
+  summarize(mean_delay = mean(Delay, na.rm=TRUE))
+
+# combine average delays with the 2 different plane categories
+combined_planes_avgdelays <- bind_rows(older_avgdelays, younger_avgdelays)
+
+# Plotting for average delay
+ggplot(combined_planes_avgdelays, aes(x=PlaneCategory, y=mean_delay, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f", mean_delay)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Average Delay", title="Average Delay of Older and Younger Planes for 2008") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+
+# Calculating % of total flights that are delayed for both older and younger planes
+
+# Filter out flights with delays greater than 0
+older_planes_with_delayed_flights <- older_planes[older_planes$Delay > 0,]
+younger_planes_with_delayed_flights <- younger_planes[younger_planes$Delay > 0,]
+
+# Calculate total delayed flights for older and younger planes
+older_planes_delayed_count <- nrow(older_planes_with_delayed_flights)
+younger_planes_delayed_count <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+older_planes_delayed_percent <- (older_planes_delayed_count / nrow(older_planes)) * 100
+younger_planes_delayed_percent <- (younger_planes_delayed_count / nrow(younger_planes)) * 100
+
+# Plotting for percentage of delayed flights
+ggplot(data=data.frame(PlaneCategory=c("Older", "Younger"), PercentDelayed=c(older_planes_delayed_percent, younger_planes_delayed_percent)),
+       aes(x=PlaneCategory, y=PercentDelayed, fill=PlaneCategory)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(aes(label=sprintf("%.2f%%", PercentDelayed)), vjust=-0.5, size=4, position=position_dodge(width=0.9)) +
+  labs(x="Plane Category", y="Percentage of delayed flights", title="Percentage of delayed flights between Older and Younger Planes in 2008") +
+  scale_fill_manual(values=c("Older"="maroon", "Younger"="lightblue")) +
+  theme_minimal()
+```
+
+
+
+
+#### Older planes experience higher average delays and this is supported by the % graph where older planes also experiences higher % in delayed flights 
+
+#### The difference in % graph correlates to the difference in average delay graph as both has a difference of about 3% and 3 minutes respectively 
+
+
+
+
+## Condensing 10 years of data into a pie chart. We are going to split it up into 2 groups. 1st overall average delay and 2nd % of delayed flights 
+
+# 1st GROUP ( AVERAGE DELAY) 
+
+# Re read the year csvs
+```{R}
+df99 <- read.csv("1999.csv")
+df00 <- read.csv("2000.csv")
+df01 <- read.csv("2001.csv")
+df02 <- read.csv("2002.csv")
+df03 <- read.csv("2003.csv")
+df04 <- read.csv("2004.csv")
+df05 <- read.csv("2005.csv")
+df06 <- read.csv("2006.csv")
+df07 <- read.csv("2007.csv")
+df08 <- read.csv("2008.csv")
+
+```
+
+
+# Combine dataframes into a list and fliter out Diverted == 1 and Cancelled == 1 as we are analysisng the normal / usual flight data timings.Plus flitering columns that we want to keep
+```{r}
+# Combine dataframes into a list
+dfs_total_1stpart <- list(
+  filter(df99, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df00, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df01, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df02, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df03, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df04, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df05, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df06, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df07, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df08, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum)
+)
+```
+
+# Re reading the plane_data and re manipulating the data inside to merge with the combined list
+```{r}
+
+# Read the plane casv
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year), ]
+
+# Rename 'tailnum' column to 'TailNum'
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge each dataframe in dfs_total_ with plane_data
+dfs_total_1stpart_merged <- lapply(dfs_total_1stpart, function(df) {
+  inner_join(df, plane_data, by = 'TailNum')
+})
+```
+
+# Making sure the dfs_total_merged are properly combined into a dataframe
+```{r}
+# Concatenate all merged data frames in dfs_total_1stpart_merged
+df_combined_1stpart <- bind_rows(dfs_total_1stpart_merged)
+
+# Print the combined data frame
+print(df_combined_1stpart)
+```
+
+
+# Cautionary flitering and further manipulation. Unlike the individual years, for both 1st part and 2nd part of the 10 year groups, we will be using the max year read which is 2008 to find the age of the plane
+```{r}
+# Drop rows with missing or invalid values in the 'year' column
+df_combined_1stpart <- df_combined_1stpart[!is.na(df_combined_1stpart$year), ]
+
+# Convert 'year' column to integer representing the year
+df_combined_1stpart$year <- as.integer(format(df_combined_1stpart$year, "%Y"))
+
+# Calculate the age of the planes based on the Year column
+df_combined_1stpart$Age <- 2008 - df_combined_1stpart$year
+
+# Extract unique years
+unique_years <- unique(df_combined_1stpart$year)
+print(unique_years)
+
+```
+
+# Creating the 2 plane categories
+```{r}
+# Define the threshold age
+threshold_age <- 20
+
+# Creation and Categorization
+df_combined_1stpart <- df_combined_1stpart %>%
+  mutate(PlaneCategory = ifelse(Age >= threshold_age, 'Older', 'Younger'))
+
+```
+
+# Calculate total delays (includes ontime, earlier and delayed fliglhts)
+```{r}
+df_combined_1stpart$Delay <- df_combined_1stpart$ArrDelay + df_combined_1stpart$DepDelay
+
+```
+
+# Separation
+```{r}
+older_planes_1stpart <- df_combined_1stpart[df_combined_1stpart$PlaneCategory == 'Older', ]
+younger_planes_1stpart <- df_combined_1stpart[df_combined_1stpart$PlaneCategory == 'Younger', ]
+
+```
+
+# Grouping to find the overall average delays (without removing ontime and earlier flights)
+```{r}
+# Group and aggregate average delays
+older_avgdelays <- older_planes_1stpart %>%
+  group_by(PlaneCategory) %>%
+  summarise(mean_delay = mean(Delay, na.rm = TRUE))
+
+younger_avgdelays <- younger_planes_1stpart %>%
+  group_by(PlaneCategory) %>%
+  summarise(mean_delay = mean(Delay, na.rm = TRUE))
+
+```
+
+# Plotting average delays for older and younger from 1999 to 2008 in a pie chart 
+```{r}
+# Concatenate older and younger planes data to make sure its in the same dataframe 
+combined_planes_avgdelays_1stpart <- rbind(older_avgdelays, younger_avgdelays)
+
+# Data
+categories <- combined_planes_avgdelays_1stpart$PlaneCategory
+avg_delays <- combined_planes_avgdelays_1stpart$mean_delay
+
+# Convert average delays to percentages to be plotting in th pie chart 
+avg_delays_percent <- avg_delays / sum(avg_delays) * 100
+
+# Colors for the slices
+colors <- c('maroon', 'lightblue')
+
+# Plot
+pie(avg_delays, labels = paste0(categories, ": ", round(avg_delays_percent, 1), "%"), col = colors, main = 'Average Delay for Older and Younger Planes from 1999 to 2008')
+
+```
+
+#### Theres generally little to no difference between younger and older planes 
+#### But to be more specific, younger planes suffer from more average delays by about 1 %
+
+
+# 2ND GROUP ( % OF DELAYED FLIGHTS IE REMOVING ONTIME AND EARLIER FLIGHTS FROM THE DELAY COLUMN WE MADE)
+
+# We have already read the years csvs
+
+# Combine dataframes into a list and fliter out Diverted == 1 and Cancelled == 1 as we are analysisng the normal / usual flight data timings. Plus flitering columns that we want to keep
+
+```{r}
+
+# Combine dataframes into a list
+dfs_total_2ndpart <- list(
+  filter(df99, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df00, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df01, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df02, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df03, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df04, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df05, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df06, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df07, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum),
+  filter(df08, Diverted == 0 & Cancelled == 0) %>% select(DepDelay, ArrDelay, Year, TailNum)
+)
+```
+
+# Re reading and re manipulating the plane_data to merge with dfs_total_2nd part into a big list
+```{r}
+
+# Read the plane casv
+plane_data <- read.csv("plane-data.csv")
+
+# Convert 'year' column to datetime
+plane_data$year <- as.Date(as.character(plane_data$year), format="%Y")
+
+# Drop rows with missing or invalid values in 'year' column
+plane_data <- plane_data[!is.na(plane_data$year), ]
+
+# Rename 'tailnum' column to 'TailNum'
+names(plane_data)[names(plane_data) == 'tailnum'] <- 'TailNum'
+
+# Merge each dataframe in dfs_total_ with plane_data
+dfs_total_2ndpart_merged <- lapply(dfs_total_2ndpart, function(df) {
+  inner_join(df, plane_data, by = 'TailNum')
+})
+```
+
+# Making sure the dfs_total_merged are properly combined into a dataframe
+```{r}
+# Concatenate all merged data frames in dfs_total_1stpart_merged
+df_combined_2ndpart <- bind_rows(dfs_total_2ndpart_merged)
+
+# Print the combined data frame
+print(df_combined_2ndpart)
+```
+
+# Cautionary flitering and further manipulation. Unlike the individual years, for both 1st part and 2nd part of the year groups, we will be using the max year read which is 2008 to find the age of planes     
+```{r}
+# Drop rows with missing or invalid values in the 'year' column
+df_combined_2ndpart <- df_combined_2ndpart[!is.na(df_combined_2ndpart$year), ]
+
+# Convert 'year' column to integer representing the year
+df_combined_2ndpart$year <- as.integer(format(df_combined_2ndpart$year, "%Y"))
+
+# Calculate the age of the planes based on the Year column
+df_combined_2ndpart$Age <- 2008 - df_combined_2ndpart$year
+
+# Extract unique years
+unique_years <- unique(df_combined_2ndpart$year)
+print(unique_years)
+
+```
+# Creating the 2 plane categories
+```{r}
+# Define the threshold age
+threshold_age <- 20
+
+# Creation and Categorization
+df_combined_2ndpart <- df_combined_2ndpart %>%
+  mutate(PlaneCategory = ifelse(Age >= threshold_age, 'Older', 'Younger'))
+
+```
+
+# Calculate total delays
+```{r}
+df_combined_2ndpart$Delay <- df_combined_2ndpart$ArrDelay + df_combined_2ndpart$DepDelay
+
+```
+
+# Separation
+```{r}
+older_planes_2ndpart <- df_combined_2ndpart[df_combined_2ndpart$PlaneCategory == 'Older', ]
+younger_planes_2ndpart <- df_combined_2ndpart[df_combined_2ndpart$PlaneCategory == 'Younger', ]
+
+```
+
+# Grouping to find average delays
+```{r}
+
+# Filter out flights with delays greater than 0 for older planes
+older_planes_with_delayed_flights <- older_planes_2ndpart[older_planes_2ndpart$Delay > 0, ]
+
+# Filter out flights with delays greater than 0 for younger planes
+younger_planes_with_delayed_flights <- younger_planes_2ndpart[younger_planes_2ndpart$Delay > 0, ]
+
+# Calculate total delayed flights for older and younger planes
+total_delayed_older_planes <- nrow(older_planes_with_delayed_flights)
+total_delayed_younger_planes <- nrow(younger_planes_with_delayed_flights)
+
+# Calculate percentage of delayed flights
+percentage_delayed_older_planes <- (total_delayed_older_planes / nrow(older_planes_2ndpart)) * 100
+percentage_delayed_younger_planes <- (total_delayed_younger_planes / nrow(younger_planes_2ndpart)) * 100
+
+print(paste("Percentage of delayed flights in older planes:", percentage_delayed_older_planes))
+print(paste("Percentage of delayed flights in younger planes:", percentage_delayed_younger_planes))
+
+```
+
+# Plotting % of delayed flights for older and younger planes from 1999 to 2008 in a piechart 
+```{r}
+# Concatenate older and younger planes data to make sure its in the same dataframe 
+combined_planes_avgdelays_2ndpart <- rbind(older_avgdelays, younger_avgdelays)
+
+# Define categories and percentages
+categories <- c("Older Planes", "Younger Planes")
+percentages <- c(percentage_delayed_older_planes, percentage_delayed_younger_planes)
+
+# Plotting the pie chart using R's base graphics
+pie(percentages, labels = categories, col = c("maroon", "lightblue"), main = "Percentage of Delayed Flights by Plane Category from 1999 to 2008")
+
+# Add percentages to the pie chart
+label <- paste(categories, ": ", round(percentages, 1), "%", sep="")
+```
+
+#### #### The graph and the printed % shows that the % of delayed flights between older and younger planes are the same for 10 years of data combined. Hence older planes do not suffer more delays than younger planes
