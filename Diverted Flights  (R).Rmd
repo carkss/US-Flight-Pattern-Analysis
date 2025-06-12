@@ -1,0 +1,2469 @@
+---
+title: "ST 2195 Coursework part 2 c)"
+output: html_document
+date: "2024-03-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Fitting a logistic regression model for the probability of diverted US flights using as many features as possible as such departure date,  scheduled departure and arrival times, coordinates and distance between departure and planned arrival airports, and the Uniquecarriers. Visualize the coefficients across years as well.
+```{r}
+install.packages("ROCR")
+install.packages("caret")
+install.packages("glmnet")
+install.packages("tidyverse")
+```
+
+```{r}
+library(tidyverse) # contains packages like dplyr and ggplot for data manipulation and plotting 
+library(caret) # Helps in creating and running the prediction model 
+library(glmnet) # It is a machine learning model found in the 'caret' package 
+library(ROCR) # Allows us to plot ROC curve and calculate the AUC score to assess how good the predictive model is 
+library(readr)  # For reading the CSV files
+```
+
+## set the working directory to souce file location / the location to where the relevant year csvs and other csvs are located at to read the dataframes
+
+
+# General formula using 1999 as a template 
+
+# Reading the relevant csv files
+```{r}
+# Load the respective year dataset
+df <- read.csv("1999.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+```
+
+# Merge airports_df and carriers_df into a merged_df
+
+### choosing the different features :  The scheduled departure and arrival times, the coordinates and distance between departure and planned arrival airports
+
+#### for the first left_join, we merge df with airports_df based on the origin column and the iata column. We then perform a left join, retaining all rows from the year df dataframe and the matching rows from airports_df are added. The suffixes=('_Departure', '_Origin') parameter adds suffixes to the overlapping column names to distinguish them after merging.
+
+#### The 2nd left_join, we further merge the result of the previous merge operation with airports_df based on the Dest column of the result dataframe and the iata column of airports_df. We again performs a left join and adds suffixes to distinguish the overlapping column names.
+
+#### The last .left_join, we lastly merge the result dataframe with carriers_df based on the UniqueCarrier column of the result dataframe and the Code column of carriers_df via a left join.
+
+#### After fully merging and creating the merged_df, we fliter out cancelled flights to 1. remove NaN values and 2. remove flights that didnt finish their expected trip
+```{r}
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+```
+
+# Checking the columns
+```{r}
+colnames(merged_df)
+```
+
+# Creating the coordinates feature
+
+#### The coordinates feature is not a column in any of the dataframes, hence we use the lat_Dest, lat_Arr, long_Dest and long_Arr in the merged_df columns to find the coordinates
+
+#### To calculate / find the coordinates , we calculate the midpoint of both lat and long and create 2 new columns called latitude and longitude that conists of the Midpoint_Latitude and Midpoint_Longitude and these 2 newly formed columns will be the placeholder for coordinates
+
+#### The coordinates feature will be represented by these 2 sub columns to prevent data type errors during the machine learning process later
+```{r}
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+```
+
+# Removing unnecessary columns for easier manipulation 
+```{r}
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+```
+
+# Checking the columns to make sure we kept the needed columns for pipeline prediction
+```{r}
+colnames(merged_df)
+```
+
+
+# For easier visualisation and organisaton, we separate the features into numerical and categorical and the following codes will firstly be looking into the numerical features 
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+```{r}
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude) # These are all the numerical features 
+x <- features # define x as the features 
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale")) # center and scale are the parameters for to standardise mean and standard deviation . These and the preProcess() are used from the caret package 
+x_train_99 <- predict(numerical_transformer, features)
+y_train_99 <- y # target variable 
+
+# Logistic Regression Model
+lr_model_99 <- glm(Diverted ~ ., data = cbind(x_train_99, Diverted = y_train_99), family = binomial) #Diverted~ indicates that diverted is the response variable. data=cbind() specifies what data is used in the model and binomial is used to distinguish between positive and negative classes. glm is a predictive model we fit data=cbind() into
+
+
+# Plotting the logistic regression model
+
+y_pred_prob_99 <- predict(lr_model_99, newdata = x_train_99, type = "response") # predict() is used to get the predicted probabilities of positive classes in the x_train
+prediction <- prediction(y_pred_prob_99, y_train_99)# prediction is from the RCOR package. It contains both predicted probabilities (x_train) and the true response (y_train)
+roc_values <- performance(prediction, "tpr", "fpr") # calculates the True Positive Rate (tpr) and False Positive Rate (fpr) 
+
+# Calculating the auc value
+
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4) # The higher the auc value, the better the model is at distinguishing between positive and negative classes. In addition, auc = 0.5 means the model is better than random guessing
+
+plot(roc_values, col = "skyblue", lwd = 2, main = paste("ROC Curve for 1999\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression", col = "skyblue", lwd = 2)
+```
+
+#### AUC = 0.62 shows that the predicitve model is better than random guessing, meaning that it is relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally not that curved but almost a straight diagonal line, indicating that the predicitive model is ok at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+
+
+
+## Visualising the coefficients of the numerical features in 1999
+```{r}
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_99) # extracts the coefficients from the logistic regression model
+coefficients_map_99 <- coefficients[-1] # removes any intercept term from the coefficients 
+
+print("Coefficients for numerical features:")
+print(coefficients_map_99) # Shows the full values
+
+# Plotting the coefficients as dots with color for easier overall readability 
+dotchart(coefficients_map_99, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # prevent any labelling of the features beside the dots as we want it as the y-axis
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 1999", cex.main = 0.9)
+```
+
+
+#### From the diagram, the numerical features generally have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### However, we can see that CRSDepTime is the only one with a negative coefficient, meaning it has an inverse relationship where an increase in CRSDepTime causes a decrease in the likelihood of the CRSDepTime feature to be in the positive class. 
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+
+
+
+
+## Fitting UniqueCarriers into their own logistic regression model and visualising their coefficients. It's steps is the same as the numerical features but making some changes in dataset labelling / naming to specify this portion is for categorical
+
+
+# Removing unnecessary columns for categorical feature for easier process
+
+### We dont have to fliter out cancelled flights as it has been done for numerical features and we are using the same merged_df as beside adding columns with new values, no other manipulation was done to change it drastically
+```{r}
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+```
+
+# Checking the columns to ensure interested columns are kept
+```{r}
+colnames(merged_df)
+```
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+```{r}
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_99 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_99 <- predict(lr_model_cat_99, newdata = x_cat, type = "response")
+prediction_cat_99 <- prediction(y_pred_prob_cat_99, y_cat)
+roc_values_cat_99 <- performance(prediction_cat_99, "tpr", "fpr")
+
+# Calculating the auc value
+
+auc <- performance(prediction_cat_99, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_99, col = "skyblue", lwd = 2, main = paste("ROC Curve for 1999\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+```
+
+#### AUC = 0.57 shows that the predicitve model is slightly better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC is steeper / less curved, hence categorical ROC has more limitations in distinguishing between positive and negative classes. Thus, categorical feature may be less important in classification
+
+
+
+
+
+# Categorical feautre coefficients 
+```{r}
+# Getting & printing the coefficients for categorical features
+coefficients_cat <- coef(lr_model_cat_99)
+coefficients_map_cat_99 <- coefficients_cat[-1]  # Exclude the intercept
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_99)
+
+# Plotting the coefficients of categorical features as dots with color
+dotchart(coefficients_map_cat_99, 
+         cex = 1.2,            # Increase the size of the dots
+         col = "magenta",      # Set the color of the dots
+         pch = 16,             # Set the dot shape
+         labels = NULL,        # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = "Coefficients of UniqueCarrier Categories", cex.main = 0.9)
+```
+
+#### From the diagram,  most of the categorical feature have an inverse relationship with the prediciting model where as when the values in the features increase, it is less likely for the features to be grouped into the positive classes
+
+#### We can see that UniqueCarrier_HP has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_AS is the only positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has more negative coefficients, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+
+# 2000 
+```{r}
+# Load the respective year dataset
+df <- read.csv("2000.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train_00 <- predict(numerical_transformer, features)
+y_train_00 <- y
+
+# Logistic Regression Model
+lr_model_00 <- glm(Diverted ~ ., data = cbind(x_train_00, Diverted = y_train_00), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob_00 <- predict(lr_model_00, newdata = x_train_00, type = "response")
+prediction <- prediction(y_pred_prob_00, y_train_00)
+roc_values_00 <- performance(prediction, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_00, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2000\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lwd = 2)
+
+
+# numerical features coefficients
+
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_00)
+coefficients_map_00 <- coefficients[-1]
+numerical_feature_names <- c('Intercept', numerical_features)
+
+print("Coefficients for numerical features:")
+print(coefficients_map_00)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_00, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2000", cex.main = 0.9)
+
+# Removing unnecessary columns for categorical feature
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_00 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_00 <- predict(lr_model_cat_00, newdata = x_cat, type = "response")
+prediction_cat_00 <- prediction(y_pred_prob_cat_00, y_cat)
+roc_values_cat_00 <- performance(prediction_cat_00, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction_cat_00, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_00, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2000\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+
+# Categorical feautre coefficients 
+
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat_00)
+coefficients_map_cat_00 <- coefficients_cat[-1]
+categories <- rownames(coefficients_map_cat_00)
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_00)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat_00, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2000", cex.main = 0.9)
+
+```
+
+#### NUMERICAL VS CATEGORICAL ROC:
+#### ___numerical__
+
+#### AUC = 0.61 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+#### ___categorical__
+
+#### AUC = 0.57 shows that the predicitve model is slightly better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally not curved, almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC has more limitations in distinguishing between positive and negative classes. Thus, categorical feature may be less important in classification
+
+#### NUMERICAL VS CATEGORICAL COEFFICIENT:
+#### ___numerical__
+
+#### From the diagram, the numerical features all have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that CRSDepTime has the lowest coefficient, meaning as CRSDepTime increases, the likelihood of the CRSDepTime feature to be in the positive class is lowest compared to the others
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+
+#### ___categorical__
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_AQ has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_AS is the only positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has more negative coefficients and its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+
+
+
+
+
+
+# 2001
+```{r}
+# Load the respective year dataset
+df <- read.csv("2001.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train_01 <- predict(numerical_transformer, features)
+y_train_01 <- y
+
+# Logistic Regression Model
+lr_model_01 <- glm(Diverted ~ ., data = cbind(x_train_01, Diverted = y_train_01), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob_01 <- predict(lr_model_01, newdata = x_train_01, type = "response")
+prediction <- prediction(y_pred_prob_01, y_train_01)
+roc_values_01 <- performance(prediction, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_01, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2001\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lwd = 2)
+
+# numerical features coefficients
+
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_01)
+coefficients_map_01 <- coefficients[-1]
+numerical_feature_names <- c('Intercept', numerical_features)
+
+print("Coefficients for numerical features:")
+print(coefficients_map_01)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_01, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2001", cex.main = 0.9)
+
+# Removing unnecessary columns for categorical feature
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_01 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_01 <- predict(lr_model_cat_01, newdata = x_cat, type = "response")
+prediction_cat_01 <- prediction(y_pred_prob_cat_01, y_cat)
+roc_values_cat_01 <- performance(prediction_cat_01, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction_cat_01, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_01, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2001\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+
+# Categorical feautre coefficients 
+
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat_01)
+coefficients_map_cat_01 <- coefficients_cat[-1]
+categories <- rownames(coefficients_map_cat_01)
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_01)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat_01, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2001", cex.main = 0.9)
+
+```
+
+
+#### NUMERICAL VS CATEGORICAL ROC:
+#### ___numerical__
+
+#### AUC = 0.61 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+#### ___categorical__
+
+#### AUC = 0.55 shows that the predicitve model is slightly better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+
+#### NUMERICAL VS CATEGORICAL COEFFICIENT:
+#### ___numerical__
+
+#### From the diagram, all of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+#### ___categorical__
+
+#### From the diagram, categorical feature mostly have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_AQ has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_AS has the most positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has  more negative coefficients and the value of its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+
+
+
+# 2002
+```{r}
+# Load the respective year dataset
+df <- read.csv("2002.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train_02 <- predict(numerical_transformer, features)
+y_train_02 <- y
+
+# Logistic Regression Model
+lr_model_02 <- glm(Diverted ~ ., data = cbind(x_train_02, Diverted = y_train_02), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob_02 <- predict(lr_model_02, newdata = x_train_02, type = "response")
+prediction <- prediction(y_pred_prob_02, y_train_02)
+roc_values_02 <- performance(prediction, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_02, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2002\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lwd = 2)
+
+
+# numerical features coefficients
+
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_02)
+coefficients_map_02 <- coefficients[-1]
+
+
+print("Coefficients for numerical features:")
+print(coefficients_map_02)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_02, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2002", cex.main = 0.9)
+
+# Removing unnecessary columns for categorical feature
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_02 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_02 <- predict(lr_model_cat_02, newdata = x_cat, type = "response")
+prediction_cat_02 <- prediction(y_pred_prob_cat_02, y_cat)
+roc_values_cat_02 <- performance(prediction_cat_02, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction_cat_02, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_02, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2002\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+# Categorical feautre coefficients 
+
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat_02)
+coefficients_map_cat_02 <- coefficients_cat[-1]
+
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_02)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat_02, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2002", cex.main = 0.9)
+
+```
+
+#### NUMERICAL VS CATEGORICAL ROC:
+#### ___numerical__
+
+#### AUC = 0.61 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes but there's still room for improvement in the model
+#### ___categorical__
+
+#### AUC = 0.56 shows that the predicitve model is slightly better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes but there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+
+#### NUMERICAL VS CATEGORICAL COEFFICIENT:
+#### ___numerical__
+
+#### From the diagram, most of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+#### ___categorical__
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_HP has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_AS has the most positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has more negative coefficients, which explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+
+# 2003
+```{r}
+# Load the respective year dataset
+df <- read.csv("2003.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train_03 <- predict(numerical_transformer, features)
+y_train_03 <- y
+
+# Logistic Regression Model
+lr_model_03 <- glm(Diverted ~ ., data = cbind(x_train_03, Diverted = y_train_03), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob_03 <- predict(lr_model_03, newdata = x_train_03, type = "response")
+prediction <- prediction(y_pred_prob_03, y_train_03)
+roc_values_03 <- performance(prediction, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_03, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2003\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lwd = 2)
+
+
+# numerical features coefficients
+
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_03)
+coefficients_map_03 <- coefficients[-1]
+
+
+print("Coefficients for numerical features:")
+print(coefficients_map_03)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_03, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2003", cex.main = 0.9)
+
+# Removing unnecessary columns for categorical feature
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_03 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_03 <- predict(lr_model_cat_03, newdata = x_cat, type = "response")
+prediction_cat_03 <- prediction(y_pred_prob_cat_03, y_cat)
+roc_values_cat_03 <- performance(prediction_cat_03, "tpr", "fpr")
+
+
+# Calculating the auc value
+auc <- performance(prediction_cat_03, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_03, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2003\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+# Categorical feautre coefficients 
+
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat_03)
+coefficients_map_cat_03 <- coefficients_cat[-1]
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_03)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat_03, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2003", cex.main = 0.9)
+
+```
+
+#### NUMERICAL VS CATEGORICAL ROC:
+#### ___numerical__
+
+#### AUC = 0.59 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+#### ___categorical__
+
+#### AUC = 0.56 shows that the predicitve model is slightly better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+
+#### NUMERICAL VS CATEGORICAL COEFFICIENT:
+#### ___numerical__
+
+#### From the diagram, most of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+#### ___categorical__
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_HA has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_AS has the most positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has more negative coefficients and its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+
+# 2004
+```{r}
+# Load the respective year dataset
+df <- read.csv("2004.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train_04 <- predict(numerical_transformer, features)
+y_train_04 <- y
+
+# Logistic Regression Model
+lr_model_04 <- glm(Diverted ~ ., data = cbind(x_train_04, Diverted = y_train_04), family = binomial)
+y_pred_prob_04 <- predict(lr_model_04, newdata = x_train_04, type = "response")
+prediction <- prediction(y_pred_prob_04, y_train_04)
+
+```
+# Continutation of 2004 
+
+### IN 2004 only there will be an error that says prediction contains NA values so a new section is added to remove the NA values
+```{R}
+
+
+# Impute missing values with the mean
+x_train_04imputed <- x_train_04
+x_train_04imputed[is.na(x_train_04imputed)] <- mean(x_train_04imputed, na.rm = TRUE)
+
+
+# Remove rows with missing values from both y_pred_prob and y_train
+complete_cases <- complete.cases(y_pred_prob_04, y_train_04)
+y_pred_prob_clean_04 <- y_pred_prob_04[complete_cases]
+y_train_clean_04 <- y_train_04[complete_cases]
+
+# Create the prediction object
+prediction <- prediction(y_pred_prob_clean_04, y_train_clean_04) 
+
+
+# Plotting the logistic regression model with the cleaned data using the same code formula mentioned at the start but with different dataset names
+y_pred_prob_04 <- predict(lr_model_04, newdata = x_train_04imputed, type = "response")
+roc_values_04 <- performance(prediction, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_04, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2004\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lwd = 2)
+
+
+# numerical features coefficients
+
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_04)
+coefficients_map_04 <- coefficients[-1]
+
+
+print("Coefficients for numerical features:")
+print(coefficients_map_04)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_04, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2004", cex.main = 0.9)
+
+# Removing unnecessary columns for categorical feature
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_04 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_04 <- predict(lr_model_cat_04, newdata = x_cat, type = "response")
+prediction_cat_04 <- prediction(y_pred_prob_cat_04, y_cat)
+roc_values_cat_04 <- performance(prediction_cat_04, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction_cat_04, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_04, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2004\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+
+# Categorical feautre coefficients 
+
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat_04)
+coefficients_map_cat_04 <- coefficients_cat[-1]
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_04)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat_04, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2004", cex.main = 0.9)
+```
+
+#### NUMERICAL VS CATEGORICAL ROC:
+#### ___numerical__
+
+#### AUC = 0.60 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+#### ___categorical__
+
+#### AUC = 0.54 shows that the predicitve model is slightly better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+
+#### NUMERICAL VS CATEGORICAL COEFFICIENT:
+#### ___numerical__
+
+#### From the diagram, most of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+#### ___categorical__
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_TZ has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_AS has the most positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has  more negative coefficients and its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+# 2005
+```{r}
+# Load the respective year dataset
+df <- read.csv("2005.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train_05 <- predict(numerical_transformer, features)
+y_train_05 <- y
+
+# Logistic Regression Model
+lr_model_05 <- glm(Diverted ~ ., data = cbind(x_train_05, Diverted = y_train_05), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob_05 <- predict(lr_model_05, newdata = x_train_05, type = "response")
+prediction <- prediction(y_pred_prob_05, y_train_05)
+roc_values_05 <- performance(prediction, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_05, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2005\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lwd = 2)
+
+
+# numerical features coefficients
+
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_05)
+coefficients_map_05 <- coefficients[-1]
+
+print("Coefficients for numerical features:")
+print(coefficients_map_05)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_05, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2005", cex.main = 0.9)
+
+# Removing unnecessary columns for categorical feature
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_05 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_05 <- predict(lr_model_cat_05, newdata = x_cat, type = "response")
+prediction_cat_05 <- prediction(y_pred_prob_cat_05, y_cat)
+roc_values_cat_05 <- performance(prediction_cat_05, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction_cat_05, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_05, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2005\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+
+# Categorical feautre coefficients 
+
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat_05)
+coefficients_map_cat_05 <- coefficients_cat[-1]
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_05)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat_05, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2005", cex.main = 0.9)
+
+```
+
+#### NUMERICAL VS CATEGORICAL ROC:
+#### ___numerical__
+
+#### AUC = 0.61 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+#### ___categorical__
+
+#### AUC = 0.57 shows that the predicitve model is slightly better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+
+#### NUMERICAL VS CATEGORICAL COEFFICIENT:
+#### ___numerical__
+
+#### From the diagram, most of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+#### ___categorical__
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_HA has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_B6 has the most positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has more negative coefficients and its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+# 2006
+```{r}
+# Load the respective year dataset
+df <- read_csv("2006.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train_06 <- predict(numerical_transformer, features)
+y_train_06 <- y
+
+# Logistic Regression Model
+lr_model_06 <- glm(Diverted ~ ., data = cbind(x_train_06, Diverted = y_train_06), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob_06 <- predict(lr_model_06, newdata = x_train_06, type = "response")
+prediction <- prediction(y_pred_prob_06, y_train_06)
+roc_values_06 <- performance(prediction, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_06, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2006\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lwd = 2)
+
+
+# numerical features coefficients
+
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_06)
+coefficients_map_06 <- coefficients[-1]
+
+print("Coefficients for numerical features:")
+print(coefficients_map_06)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_06, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2006", cex.main = 0.9)
+
+# Removing unnecessary columns for categorical feature
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_06 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_06 <- predict(lr_model_cat_06, newdata = x_cat, type = "response")
+prediction_cat_06 <- prediction(y_pred_prob_cat_06, y_cat)
+roc_values_cat_06 <- performance(prediction_cat_06, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction_cat_06, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_06, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2006\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+# Categorical feature coefficients 
+
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat_06)
+coefficients_map_cat_06 <- coefficients_cat[-1]
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_06)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat_06, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2006", cex.main = 0.9)
+
+```
+
+#### NUMERICAL VS CATEGORICAL ROC:
+#### ___numerical__
+
+#### AUC = 0.63 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+#### ___categorical__
+
+#### AUC = 0.60 shows that the predicitve model is better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is also gnenerally quite curved but almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes but there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC is lessed curved, hence it has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+
+#### NUMERICAL VS CATEGORICAL COEFFICIENT:
+#### ___numerical__
+
+#### From the diagram, most of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+#### ___categorical__
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_AQ has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_B6 has the most positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has more negative coefficients and its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+# 2007
+```{r}
+# Load the respective year dataset
+df <- read_csv("2007.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train_07 <- predict(numerical_transformer, features)
+y_train_07 <- y
+
+# Logistic Regression Model
+lr_model_07 <- glm(Diverted ~ ., data = cbind(x_train_07, Diverted = y_train_07), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob_07 <- predict(lr_model_07, newdata = x_train_07, type = "response")
+prediction <- prediction(y_pred_prob_07, y_train_07)
+roc_values_07 <- performance(prediction, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_07, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2007\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lwd = 2)
+# numerical features coefficients
+
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_07)
+coefficients_map_07 <- coefficients[-1]
+
+print("Coefficients for numerical features:")
+print(coefficients_map_07)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_07, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2007", cex.main = 0.9)
+
+# Removing unnecessary columns for categorical feature
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_07 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_07 <- predict(lr_model_cat_07, newdata = x_cat, type = "response")
+prediction_cat_07 <- prediction(y_pred_prob_cat_07, y_cat)
+roc_values_cat_07 <- performance(prediction_cat_07, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction_cat_07, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_07, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2007\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+# Categorical feautre coefficients 
+
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat_07)
+coefficients_map_cat_07 <- coefficients_cat[-1]
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_07)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat_07, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2007", cex.main = 0.9)
+
+```
+
+#### NUMERICAL VS CATEGORICAL ROC:
+#### ___numerical__
+
+#### AUC = 0.62 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+#### ___categorical__
+
+#### AUC = 0.59 shows that the predicitve model is better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is also generlaly quite curved but almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC is lessed curved and hence has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+
+#### NUMERICAL VS CATEGORICAL COEFFICIENT:
+#### ___numerical__
+
+#### From the diagram, most of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that CRSArrTime has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+#### ___categorical__
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_HA has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_XE has the most positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has more negative coefficients and its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+# 2008
+```{r}
+# Load the respective year dataset
+df <- read_csv("2008.csv")
+
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+
+# Merge airports_df with df based on 'Origin' and 'iata'
+merged_df <- left_join(df, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df based on 'Dest' and 'iata'
+merged_df <- left_join(merged_df, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df based on 'UniqueCarrier' and 'Code'
+merged_df <- left_join(merged_df, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df <- filter(merged_df, Cancelled == 0)
+
+# Calculate the midpoint coordinates
+merged_df$Midpoint_Latitude <- (merged_df$lat_Origin + merged_df$lat_Destination) / 2
+
+merged_df$Midpoint_Longitude <- (merged_df$long_Origin + merged_df$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df$latitude <- merged_df$Midpoint_Latitude
+merged_df$longitude <- merged_df$Midpoint_Longitude
+
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+
+# Classifying 
+features <- merged_df %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train_08 <- predict(numerical_transformer, features)
+y_train_08 <- y
+
+# Logistic Regression Model
+lr_model_08 <- glm(Diverted ~ ., data = cbind(x_train_08, Diverted = y_train_08), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob_08 <- predict(lr_model_08, newdata = x_train_08, type = "response")
+prediction <- prediction(y_pred_prob_08, y_train_08)
+roc_values_08 <- performance(prediction, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_08, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2008\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lwd = 2)
+
+# numerical features coefficients
+
+# Getting & printing the coefficients
+coefficients <- coef(lr_model_08)
+coefficients_map_08 <- coefficients[-1]
+
+print("Coefficients for numerical features:")
+print(coefficients_map_08)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_08, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2008", cex.main = 0.9)
+
+# Removing unnecessary columns for categorical feature
+
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df <- merged_df[, !colnames(merged_df) %in% columns_to_remove]
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+# Classifying
+features_cat <- merged_df %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat_08 <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat_08 <- predict(lr_model_cat_08, newdata = x_cat, type = "response")
+prediction_cat_08 <- prediction(y_pred_prob_cat_08, y_cat)
+roc_values_cat_08 <- performance(prediction_cat_08, "tpr", "fpr")
+
+# Calculating the auc value
+auc <- performance(prediction_cat_08, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+
+plot(roc_values_cat_08, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2008\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lwd = 2)
+
+# Categorical feautre coefficients 
+
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat_08)
+coefficients_map_cat_08 <- coefficients_cat[-1]
+
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat_08)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat_08, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2008", cex.main = 0.9)
+
+```
+
+
+
+#### NUMERICAL VS CATEGORICAL ROC:
+#### ___numerical__
+
+#### AUC = 0.61 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+#### ___categorical__
+
+#### AUC = 0.56 shows that the predicitve model is slightly better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+
+#### NUMERICAL VS CATEGORICAL COEFFICIENT:
+#### ___numerical__
+
+#### From the diagram, most of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that CRSArrTime has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+#### ___categorical__
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_HA has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_AS is the only positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has a more negative value for its coefficient and its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+
+
+
+## CONDENSING 10 YEARS INTO A DATAFRAME TO PLOT ROC CURVE AND FINDING ITS COEFFICIENT. However, due to the size of the data, we have broken it up into 2 groups of 5 years 
+
+#### The codes for 5 years are still using the same template provivded at the very start but now the dataset names would be named eg _1stpart or _2ndpart to prevent any overlapping of data while running it all at once 
+
+
+# Read data for 5 years
+```{R}
+df99 <- read.csv("1999.csv")
+df00 <- read.csv("2000.csv")
+df01 <- read.csv("2001.csv")
+df02 <- read.csv("2002.csv")
+df03 <- read.csv("2003.csv")
+```
+
+# List of DataFrames with 5 years together
+```{r}
+dfs_total_1stpart <- list(df99, df00, df01, df02, df03)
+
+# Concatenate the DataFrames in the list along the rows axis
+merged_df_1stpart<- bind_rows(dfs_total_1stpart)
+``` 
+
+# Load the relevant dataset
+```{r}
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+```
+
+# Merge airports_df and carriers_df into merged_df
+```{r}
+# Merge airports_df with merged_df_1stpart based on 'Origin' and 'iata'
+merged_df_1stpart <- left_join(merged_df_1stpart, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df_1stpart based on 'Dest' and 'iata'
+merged_df_1stpart <- left_join(merged_df_1stpart, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df_1stpart based on 'UniqueCarrier' and 'Code'
+merged_df_1stpart <- left_join(merged_df_1stpart, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df_1stpart <- filter(merged_df_1stpart, Cancelled == 0)
+
+```
+
+```{r}
+colnames(merged_df_1stpart)
+```
+
+# Creating the coordinates feature
+```{r}
+# Calculate the midpoint coordinates
+merged_df_1stpart$Midpoint_Latitude <- (merged_df_1stpart$lat_Origin + merged_df_1stpart$lat_Destination) / 2
+
+merged_df_1stpart$Midpoint_Longitude <- (merged_df_1stpart$long_Origin + merged_df_1stpart$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df_1stpart$latitude <- merged_df_1stpart$Midpoint_Latitude
+merged_df_1stpart$longitude <- merged_df_1stpart$Midpoint_Longitude
+```
+
+# Removing unnecessary columns
+```{r}
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+# Remove columns by name
+merged_df_1stpart <- merged_df_1stpart[, !colnames(merged_df_1stpart) %in% columns_to_remove]
+
+```
+
+# Checking merged_df1stpart column
+```{R}
+colnames(merged_df_1stpart)
+```
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+```{r}
+# Classifying 
+features <- merged_df_1stpart %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df_1stpart$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train <- predict(numerical_transformer, features)
+y_train <- y
+
+# Logistic Regression Model
+lr_model <- glm(Diverted ~ ., data = cbind(x_train, Diverted = y_train), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob <- predict(lr_model, newdata = x_train, type = "response")
+prediction <- prediction(y_pred_prob, y_train)
+roc_values <- performance(prediction, "tpr", "fpr")
+
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+plot(roc_values, col = "skyblue", lwd = 2, main = paste("ROC Curve for 1st  5 years\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for numerical feature", col = "skyblue", lty = 1)
+```
+
+#### AUC = 0.61 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes but there's still room for improvement in the model
+
+
+
+
+# numerical features coefficients
+```{r}
+# Getting & printing the coefficients
+coefficients <- coef(lr_model)
+coefficients_map <- coefficients[-1]
+
+print("Coefficients for numerical features:")
+print(coefficients_map)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 1st 5 years", cex.main = 0.9)
+
+
+```
+#### From the diagram, most of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+
+
+
+
+
+# Removing unnecessary columns
+```{r}
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df_1stpart <- merged_df_1stpart[, !colnames(merged_df_1stpart) %in% columns_to_remove]
+```
+
+# Checking the columns
+```{r}
+colnames(merged_df_1stpart)
+```
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+```{r}
+# Classifying
+features_cat <- merged_df_1stpart %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df_1stpart$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat <- predict(lr_model_cat, newdata = x_cat, type = "response")
+prediction_cat <- prediction(y_pred_prob_cat, y_cat)
+roc_values_cat <- performance(prediction_cat, "tpr", "fpr")
+
+auc <- performance(prediction_cat, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+plot(roc_values_cat, col = "skyblue", lwd = 2, main = paste("ROC Curve for 1st  5 years\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lty = 1)
+```
+
+#### AUC = 0.56 shows that the predicitve model is better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes but there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+
+
+
+
+
+# Categorical feautre coefficients 
+```{r}
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat)
+coefficients_map_cat <- coefficients_cat[-1]
+
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat)
+
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of categorical Features for 1st 5 years", cex.main = 0.9)
+
+
+```
+
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the positive classes
+
+#### We can see that UniqueCarrier_AQ has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_AS has the most positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has more negative coefficients and its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
+
+
+# NEXT 5 YEARS OF DATA
+
+
+# Read data for 5 years
+```{R}
+df04 <- read_csv("2004.csv")
+df05 <- read_csv("2005.csv")
+df06 <- read_csv("2006.csv")
+df07 <- read_csv("2007.csv")
+df08 <- read_csv("2008.csv")
+```
+
+
+# List of DataFrames with 5 years together
+```{r}
+dfs_total_2ndpart <- list(df04, df05, df06, df07, df08)
+
+# Concatenate the DataFrames in the list along the rows axis
+merged_df_2ndpart<- bind_rows(dfs_total_2ndpart)
+``` 
+# Load the relevant dataset
+```{r}
+# Load the airports dataset
+airports_df <- read.csv("airports.csv")
+
+# Load the carriers dataset
+carriers_df <- read.csv("carriers.csv")
+```
+
+# Merge airports_df and carriers_df into merged_df_2ndpart
+```{r}
+# Merge airports_df with merged_df_1stpart based on 'Origin' and 'iata'
+merged_df_2ndpart <- left_join(merged_df_2ndpart, airports_df, by = c('Origin' = 'iata'))
+
+# Merge airports_df with merged_df_1stpart based on 'Dest' and 'iata'
+merged_df_2ndpart <- left_join(merged_df_2ndpart, airports_df, by = c('Dest' = 'iata'), suffix = c('_Origin', '_Destination'))
+
+# Merge carriers_df with merged_df_1stpart based on 'UniqueCarrier' and 'Code'
+merged_df_2ndpart <- left_join(merged_df_2ndpart, carriers_df, by = c('UniqueCarrier' = 'Code'))
+
+# Filter out canceled flights
+merged_df_2ndpart <- filter(merged_df_2ndpart, Cancelled == 0)
+
+```
+
+```{r}
+colnames(merged_df_2ndpart)
+```
+
+# Creating the coordinates feature
+```{r}
+# Calculate the midpoint coordinates
+merged_df_2ndpart$Midpoint_Latitude <- (merged_df_2ndpart$lat_Origin + merged_df_2ndpart$lat_Destination) / 2
+
+merged_df_2ndpart$Midpoint_Longitude <- (merged_df_2ndpart$long_Origin + merged_df_2ndpart$long_Destination) / 2
+
+# Coordinates feature would consist of latitude and longitude separately to prevent value error in following codes
+merged_df_2ndpart$latitude <- merged_df_2ndpart$Midpoint_Latitude
+merged_df_2ndpart$longitude <- merged_df_2ndpart$Midpoint_Longitude
+```
+
+# Removing unnecessary columns
+```{r}
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description")
+
+# Remove columns by name
+merged_df_2ndpart <- merged_df_2ndpart[, !colnames(merged_df_2ndpart) %in% columns_to_remove]
+
+```
+
+# Checking merged_df1stpart column
+```{R}
+colnames(merged_df_2ndpart)
+```
+
+# NUMERICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+
+```{r}
+# Classifying 
+features <- merged_df_2ndpart %>%
+  select(CRSDepTime, CRSArrTime, Distance, latitude, longitude)
+x <- features
+y <- as.numeric(merged_df_2ndpart$Diverted == 1)
+numerical_features <- c('CRSDepTime', 'CRSArrTime', 'Distance', 'latitude', 'longitude')
+
+# Machine learning pipeline
+numerical_transformer <- preProcess(features, method = c("center", "scale"))
+x_train <- predict(numerical_transformer, features)
+y_train <- y
+
+# Logistic Regression Model
+lr_model <- glm(Diverted ~ ., data = cbind(x_train, Diverted = y_train), family = binomial)
+
+
+# Plotting the logistic regression model
+y_pred_prob <- predict(lr_model, newdata = x_train, type = "response")
+prediction <- prediction(y_pred_prob, y_train)
+roc_values <- performance(prediction, "tpr", "fpr")
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y-values"))
+auc<- round(auc, 4)
+plot(roc_values, col = "skyblue", lwd = 2, main = paste("ROC Curve for 1st 5 years\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+
+legend("bottomright", legend = "Logistic Regression", col = "skyblue", lwd = 2)
+```
+
+### There are NA values in this section as 2004 dataframe contains NA value as mentioned in its individual year coding section. The following codes will also show the method to remove the Na values similiarily to the one in 2004
+
+```{r}
+
+# Impute missing values with the mean
+x_train_imputed <- x_train
+x_train_imputed[is.na(x_train_imputed)] <- mean(x_train_imputed, na.rm = TRUE)
+
+
+# Remove rows with missing values from both y_pred_prob and y_train
+complete_cases <- complete.cases(y_pred_prob, y_train)
+y_pred_prob_clean <- y_pred_prob[complete_cases]
+y_train_clean<- y_train[complete_cases]
+
+# Create the prediction object
+prediction <- prediction(y_pred_prob_clean, y_train_clean) 
+
+```
+
+
+```{r}
+# Remove rows with missing values from both y_pred_prob and y_train
+complete_cases <- complete.cases(y_pred_prob, y_train)
+
+# Subset y_pred_prob and y_train using the complete_cases logical vector
+y_pred_prob_clean <- y_pred_prob[complete_cases]
+y_train_clean <- y_train[complete_cases]
+
+# Create the prediction object
+prediction <- prediction(y_pred_prob_clean, y_train_clean)
+
+``` 
+
+
+
+# Re plotting the logistic regression model after fully cleaning the data 
+```{r}
+# Plotting the logistic regression model
+
+roc_values <- performance(prediction, "tpr", "fpr")
+auc <- performance(prediction, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc <- round(auc, 4)
+plot(roc_values, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2nd 5 years\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression", col = "skyblue", lwd = 2)
+
+```
+
+#### AUC = 0.61 shows that the predicitve model is better than random guessing but it is still relatively ok in distinguishing between positive and negative classes 
+
+#### The ROC curve itself its generally quite curved but it is almost a straight diagonal line, indicating that the predicitive model is limited at distinguishing between positive and negative classes and there's still room for improvement in the model
+
+
+
+
+
+# numerical features coefficients
+```{r}
+# Getting & printing the coefficients
+coefficients <- coef(lr_model)
+coefficients_map <- coefficients[-1]
+numerical_feature_names <- c('Intercept', numerical_features)
+
+print("Coefficients for numerical features:")
+print(coefficients_map)
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of Numerical Features for 2nd 5 years", cex.main = 0.9)
+
+
+```
+
+
+#### From the diagram, most of the numerical features have a positive relationship with the prediciting model where as when the values in the features increase, it is more likely for the features to be grouped into the positive classes
+
+#### We can see that only CRSDepTime has a negative coefficient, meaning as CRSDepTime increases, its is more liekly for CRSDepTime feature to be in the negative class 
+
+#### We can also see that Distance has the highest positive coefficient, meaning that when the distance increases, its is very likely to be in the positive class
+
+
+
+# Removing unnecessary columns
+```{r}
+# Naming the columns to remove
+columns_to_remove <- c("DepTime", "ArrTime", "CancellationCode", "Month", "DayofMonth", "DayOfWeek", "CRSElapsedTime", "ArrDelay", "DepDelay", "TaxiIn", "TaxiOut", "CancellationCode", "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "airport_Origin", "city_Origin", "state_Origin", "airport_Destination", "city_Destination", "state_Destination", "country_Destination", "Description", "CRSArrTime", "CRSDepTime", "FlightNum", "TailNum", "ActualElapsedTime", "AirTime", "Origin", "Dest", "Distance", "country_Origin", "lat_Origin", "long_Origin", "lat_Destination", "long_Destination","Midpoint_Latitude", "Midpoint_Longitude", "latitude", "longitude" )
+
+# Remove columns by name
+merged_df_2ndpart <- merged_df_2ndpart[, !colnames(merged_df_2ndpart) %in% columns_to_remove]
+```
+
+# Checking the columns
+```{r}
+colnames(merged_df_2ndpart)
+```
+
+# CATEGORICAL FEATURES LOGISTIC REGRESSION MODEL AND COEFFICIENTS
+```{r}
+# Classifying
+features_cat <- merged_df_2ndpart %>%
+  select(UniqueCarrier)
+x_cat <- features_cat
+y_cat <- as.numeric(merged_df_2ndpart$Diverted == 1)
+
+# Logistic Regression Model for categorical features
+lr_model_cat <- glm(Diverted ~ ., data = cbind(x_cat, Diverted = y_cat), family = binomial)
+
+# Predicting probabilities for categorical features
+y_pred_prob_cat <- predict(lr_model_cat, newdata = x_cat, type = "response")
+prediction_cat <- prediction(y_pred_prob_cat, y_cat)
+roc_values_cat <- performance(prediction_cat, "tpr", "fpr")
+
+auc <- performance(prediction_cat, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc<- round(auc, 4)
+plot(roc_values_cat, col = "skyblue", lwd = 2, main = paste("ROC Curve for 2nd  5 years\nAUC =", auc))
+abline(0, 1, col = "darkgrey", lty = 2, lwd = 2)
+
+legend("bottomright", legend = "Logistic Regression for categorical feature", col = "skyblue", lty = 1)
+```
+#### AUC = 0.57 shows that the predicitve model is better than random guessing but it is relatively bad in distinguishing between positive and negative classes 
+
+#### The ROC curve itself is almost a straight diagonal line, indicating that the predicitive model is very limited at distinguishing between positive and negative classes but there's still room for improvement in the model
+
+#### In comparison to the numerical features ROC, the categorical feature ROC has much more limitations in distinguishing between positive and negative classes. Thus, categorical feature is less important in classification
+# Categorical feautre coefficients 
+
+
+```{r}
+# Getting & printing the coefficients
+coefficients_cat <- coef(lr_model_cat)
+coefficients_map_cat <- coefficients_cat[-1]
+categories <- rownames(coefficients_map_cat)
+
+print("Coefficients for UniqueCarrier categories:")
+print(coefficients_map_cat)
+
+
+# Plotting the coefficients as dots with color
+dotchart(coefficients_map_cat, 
+         cex = 1.2,  # Increase the size of the dots
+         col = "magenta",  # Set the color of the dots
+         pch = 16,  # Set the dot shape
+         labels = NULL,  # Suppress the labels
+         xlab = "Coefficient Value", 
+         ylab = "Feature",
+         main = " Coefficients of categorical Features for 2nd 5 years", cex.main = 0.9)
+
+
+```
+
+
+#### From the diagram, categorical feature generally have an inverse relationship with the prediciting model where as when the values in the features increase, it is likely for the features to be grouped into the negative classes
+
+#### We can see that UniqueCarrier_HA has the most negative coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the negative class
+
+#### We can see that UniqueCarrier_B6 has the most positive coefficient, meaning as the number of flights via this carrier increases, it is very likely to be grouped into the positive class
+
+#### Overall compared to numerical features, cateogrical feature has more negative coefficients and its positive coefficients are lower than numerical's, which also explains why cateogrical feature ROC Curve has a harder job in distinguishing between positive and negative classes 
+
+
